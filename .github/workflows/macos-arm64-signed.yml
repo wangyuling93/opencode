@@ -1,13 +1,17 @@
 # Fork-local Apple Silicon release: signed, notarized, and stapled macOS arm64
-# DMGs for the OpenCode desktop app and the terminal CLI.
+# DMGs for desktop + CLI.
 #
-# Separate from the canonical multi-platform `publish.yml`.
+# UX: one manual click — Actions → macos-arm64-signed → Run workflow
 #
-# One manual trigger (Run workflow). Internally, CLI and desktop paths run in
-# parallel on separate macOS runners after version resolve.
+# Internal graph (parallel after resolve; free minutes on public repos favor
+# wall-clock over serializing on one runner):
 #
-# Signing values are only exposed to jobs that use the protected `codesigning`
-# environment:
+#   resolve-version
+#     ├── package-cli      (build + sign + notarize CLI DMG)
+#     └── package-desktop  (build + sign + notarize desktop DMG)
+#              └── publish (optional; waits for both)
+#
+# codesigning environment (secrets/vars):
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
 #            APPLE_APP_SPECIFIC_PASSWORD
 #   variables: APPLE_ID, APPLE_TEAM_ID
@@ -15,11 +19,9 @@
 # Setup:
 #   ./.github/scripts/setup-macos-signing-secrets.sh --repo OWNER/REPO
 #
-# Outputs:
+# Assets:
 #   opencode-desktop-mac-arm64.dmg
 #   opencode-cli-mac-arm64.dmg
-#
-# Run: Actions → macos-arm64-signed → Run workflow
 # Tag: macos-arm64-v{version}-{7-char commit sha}
 
 name: macos-arm64-signed
@@ -80,19 +82,29 @@ jobs:
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
-  # --- CLI path (parallel with package-desktop) ---
-
-  build-cli:
+  package-cli:
     needs: resolve-version
-    name: Build arm64 CLI
+    name: CLI DMG
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 120
+    environment:
+      name: codesigning
     permissions:
       contents: read
+    env:
+      SIGNING_KEYCHAIN: build.keychain
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           persist-credentials: false
+
+      - uses: ./.github/actions/macos-codesigning-setup
+        with:
+          apple-developer-id-p12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          apple-developer-id-p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          apple-id: ${{ vars.APPLE_ID }}
+          apple-team-id: ${{ vars.APPLE_TEAM_ID }}
 
       - uses: ./.github/actions/setup-bun
         with:
@@ -122,60 +134,8 @@ jobs:
           [[ "$version_output" == *"${RELEASE_VERSION}"* ]] \
             || { echo "Expected opencode --version to contain ${RELEASE_VERSION}" >&2; exit 1; }
           lipo "$binary" -verify_arch arm64
-          file "$binary"
 
-      - name: Upload unsigned CLI binary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: macos-arm64-unsigned-cli
-          path: packages/opencode/dist/opencode-darwin-arm64/bin/opencode
-          if-no-files-found: error
-          retention-days: 1
-
-  package-cli:
-    needs:
-      - resolve-version
-      - build-cli
-    name: Sign CLI DMG
-    runs-on: macos-26
-    timeout-minutes: 90
-    environment:
-      name: codesigning
-    permissions:
-      contents: read
-    env:
-      SIGNING_KEYCHAIN: build.keychain
-    steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-        with:
-          persist-credentials: false
-
-      - name: Require codesigning environment
-        env:
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
-          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-          APPLE_ID: ${{ vars.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: ./.github/scripts/macos-signing/require_codesigning_env.sh
-
-      - name: Import Developer ID certificate
-        uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
-        with:
-          keychain: build
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-
-      - name: Resolve signing identity
-        run: ./.github/scripts/macos-signing/resolve_signing_identity.sh build.keychain
-
-      - name: Download unsigned CLI binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: macos-arm64-unsigned-cli
-          path: packages/opencode/dist/opencode-darwin-arm64/bin
-
-      - name: Package signed CLI DMG
+      - name: Sign, notarize, and staple CLI DMG
         env:
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
@@ -199,11 +159,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # --- Desktop path (starts right after resolve-version; parallel with CLI) ---
-
   package-desktop:
     needs: resolve-version
-    name: Build and sign desktop DMG
+    name: Desktop DMG
     runs-on: macos-26
     timeout-minutes: 180
     environment:
@@ -217,21 +175,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Require codesigning environment
-        env:
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
-          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-          APPLE_ID: ${{ vars.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: ./.github/scripts/macos-signing/require_codesigning_env.sh
-
-      - name: Import Developer ID certificate
-        uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+      - uses: ./.github/actions/macos-codesigning-setup
         with:
-          keychain: build
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          apple-developer-id-p12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          apple-developer-id-p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          apple-id: ${{ vars.APPLE_ID }}
+          apple-team-id: ${{ vars.APPLE_TEAM_ID }}
+          # electron-builder finds the identity via CSC_KEYCHAIN; no SIGNING_IDENTITY needed.
+          resolve-identity: "false"
 
       - uses: ./.github/actions/setup-bun
         with:
@@ -258,7 +210,7 @@ jobs:
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
 
       - name: Package signed desktop DMG
-        # electron-builder notarize:true staples the .app; outer DMG is stapled next.
+        # electron-builder notarize:true staples the .app; outer DMG stapled next.
         run: npx electron-builder --mac dmg --arm64 --publish never --config electron-builder.config.ts
         working-directory: packages/desktop
         timeout-minutes: 60
@@ -305,8 +257,6 @@ jobs:
           path: packages/desktop/dist/
           if-no-files-found: warn
           retention-days: 7
-
-  # --- One publish after both paths finish ---
 
   publish:
     if: ${{ inputs.publish_github_release }}
