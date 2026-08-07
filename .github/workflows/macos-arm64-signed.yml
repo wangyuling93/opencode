@@ -204,8 +204,10 @@ jobs:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
 
-      - name: Package signed and notarized desktop DMG
+      - name: Package signed desktop DMG
         # Prefer CLI target "dmg" over config ["dmg","zip"] so we do not build zip.
+        # electron-builder notarize:true staples the .app; the outer DMG is
+        # notarized + stapled in the next step (same contract as the CLI DMG).
         run: npx electron-builder --mac dmg --arm64 --publish never --config electron-builder.config.ts
         working-directory: packages/desktop
         timeout-minutes: 60
@@ -215,6 +217,14 @@ jobs:
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+
+      - name: Notarize and staple desktop DMG
+        env:
+          APPLE_ID: ${{ vars.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          REPORT_DIR: ${{ github.workspace }}/macos-notarization/desktop-mac-arm64
+        run: ./.github/scripts/macos-signing/notarize_and_staple_dmg.sh packages/desktop/dist/opencode-desktop-mac-arm64.dmg
 
       - name: Verify desktop DMG
         run: ./.github/scripts/macos-signing/verify_desktop_dmg.sh packages/desktop/dist/opencode-desktop-mac-arm64.dmg
@@ -236,12 +246,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload CLI notarization report
+      - name: Upload notarization reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: macos-arm64-cli-notarization
-          path: macos-notarization/cli-mac-arm64/
+          name: macos-arm64-notarization
+          path: macos-notarization/
           if-no-files-found: warn
           retention-days: 14
 
