@@ -3,7 +3,11 @@
 #
 # Separate from the canonical multi-platform `publish.yml`.
 #
-# Signing values are only exposed to the protected `codesigning` environment:
+# One manual trigger (Run workflow). Internally, CLI and desktop paths run in
+# parallel on separate macOS runners after version resolve.
+#
+# Signing values are only exposed to jobs that use the protected `codesigning`
+# environment:
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
 #            APPLE_APP_SPECIFIC_PASSWORD
 #   variables: APPLE_ID, APPLE_TEAM_ID
@@ -15,9 +19,8 @@
 #   opencode-desktop-mac-arm64.dmg
 #   opencode-cli-mac-arm64.dmg
 #
-# Run manually only (Actions → macos-arm64-signed → Run workflow).
+# Run: Actions → macos-arm64-signed → Run workflow
 # Tag: macos-arm64-v{version}-{7-char commit sha}
-# Same version + same commit → same tag; re-runs overwrite assets.
 
 name: macos-arm64-signed
 
@@ -55,7 +58,6 @@ concurrency:
 
 jobs:
   resolve-version:
-    # Do not run on the official upstream publish repo.
     if: github.repository != 'anomalyco/opencode'
     runs-on: ubuntu-latest
     outputs:
@@ -77,6 +79,8 @@ jobs:
           INPUT_CHANNEL: ${{ inputs.channel }}
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
+
+  # --- CLI path (parallel with package-desktop) ---
 
   build-cli:
     needs: resolve-version
@@ -128,19 +132,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # One codesigning job: shared cert import for CLI DMG + desktop DMG.
-  package:
+  package-cli:
     needs:
       - resolve-version
       - build-cli
-    name: Sign, notarize, and staple DMGs
+    name: Sign CLI DMG
     runs-on: macos-26
-    timeout-minutes: 180
+    timeout-minutes: 90
     environment:
       name: codesigning
     permissions:
       contents: read
-    # Non-secret defaults only. Secrets are step-scoped below.
     env:
       SIGNING_KEYCHAIN: build.keychain
     steps:
@@ -180,6 +182,57 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: ./.github/scripts/macos-signing/package_cli_dmg.sh
 
+      - name: Upload signed CLI DMG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-arm64-signed-cli
+          path: dist/release-assets/opencode-cli-mac-arm64.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload CLI notarization report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-arm64-cli-notarization
+          path: macos-notarization/cli-mac-arm64/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # --- Desktop path (starts right after resolve-version; parallel with CLI) ---
+
+  package-desktop:
+    needs: resolve-version
+    name: Build and sign desktop DMG
+    runs-on: macos-26
+    timeout-minutes: 180
+    environment:
+      name: codesigning
+    permissions:
+      contents: read
+    env:
+      SIGNING_KEYCHAIN: build.keychain
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        with:
+          persist-credentials: false
+
+      - name: Require codesigning environment
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ vars.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: ./.github/scripts/macos-signing/require_codesigning_env.sh
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+        with:
+          keychain: build
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+
       - uses: ./.github/actions/setup-bun
         with:
           install-flags: --os=darwin --cpu=arm64
@@ -205,9 +258,7 @@ jobs:
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
 
       - name: Package signed desktop DMG
-        # Prefer CLI target "dmg" over config ["dmg","zip"] so we do not build zip.
-        # electron-builder notarize:true staples the .app; the outer DMG is
-        # notarized + stapled in the next step (same contract as the CLI DMG).
+        # electron-builder notarize:true staples the .app; outer DMG is stapled next.
         run: npx electron-builder --mac dmg --arm64 --publish never --config electron-builder.config.ts
         working-directory: packages/desktop
         timeout-minutes: 60
@@ -229,29 +280,20 @@ jobs:
       - name: Verify desktop DMG
         run: ./.github/scripts/macos-signing/verify_desktop_dmg.sh packages/desktop/dist/opencode-desktop-mac-arm64.dmg
 
-      - name: Stage desktop DMG
-        run: |
-          set -euo pipefail
-          mkdir -p dist/release-assets
-          cp packages/desktop/dist/opencode-desktop-mac-arm64.dmg dist/release-assets/
-          ls -lah dist/release-assets/
-
-      - name: Upload signed release assets
+      - name: Upload signed desktop DMG
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: macos-arm64-signed
-          path: |
-            dist/release-assets/opencode-cli-mac-arm64.dmg
-            dist/release-assets/opencode-desktop-mac-arm64.dmg
+          name: macos-arm64-signed-desktop
+          path: packages/desktop/dist/opencode-desktop-mac-arm64.dmg
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload notarization reports
+      - name: Upload desktop notarization report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: macos-arm64-notarization
-          path: macos-notarization/
+          name: macos-arm64-desktop-notarization
+          path: macos-notarization/desktop-mac-arm64/
           if-no-files-found: warn
           retention-days: 14
 
@@ -264,11 +306,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  # --- One publish after both paths finish ---
+
   publish:
     if: ${{ inputs.publish_github_release }}
     needs:
       - resolve-version
-      - package
+      - package-cli
+      - package-desktop
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     permissions:
@@ -279,10 +324,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download signed assets
+      - name: Download signed CLI DMG
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: macos-arm64-signed
+          name: macos-arm64-signed-cli
+          path: release-assets
+
+      - name: Download signed desktop DMG
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-arm64-signed-desktop
           path: release-assets
 
       - name: Verify release assets
