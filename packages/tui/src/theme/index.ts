@@ -131,9 +131,11 @@ const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 60)
 const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 40)
 
 /**
- * Two-tier transparent UI:
- * - Root canvas + large content fills go fully clear so the terminal wallpaper shows through.
- * - Elevated surfaces (panels/menus/elements) stay opaque so dialogs, toasts, and menus remain readable.
+ * Transparent UI:
+ * - Root canvas, prompt chrome, slash/autocomplete menus, and large content fills go fully clear
+ *   so the terminal wallpaper shows through (prompt uses backgroundElement; slash list uses
+ *   backgroundMenu — both already handle alpha=0 borders in component code).
+ * - Modal dialog plates (backgroundPanel) stay opaque so dialogs/toasts remain readable.
  * - Overlay scrims get softer alpha; selection text keeps per-surface contrast via selectedForeground(bg).
  */
 export function applyUiTransparency(theme: Theme): Theme {
@@ -148,6 +150,10 @@ export function applyUiTransparency(theme: Theme): Theme {
   return {
     ...theme,
     background,
+    // Prompt input box + footer chrome.
+    backgroundElement: clearAlpha(theme.backgroundElement),
+    // Slash command / autocomplete popup list.
+    backgroundMenu: clearAlpha(theme.backgroundMenu),
     // Large content fills cleared for wallpaper.
     markdownCodeBlock: clearAlpha(theme.markdownCodeBlock),
     diffAddedBg: clearAlpha(theme.diffAddedBg),
@@ -155,7 +161,7 @@ export function applyUiTransparency(theme: Theme): Theme {
     diffContextBg: clearAlpha(theme.diffContextBg),
     diffAddedLineNumberBg: clearAlpha(theme.diffAddedLineNumberBg),
     diffRemovedLineNumberBg: clearAlpha(theme.diffRemovedLineNumberBg),
-    // Elevated plates (backgroundPanel / Element / Menu) intentionally left opaque via ...theme.
+    // Modal dialog plate (backgroundPanel) stays opaque via ...theme.
     selectedListItemText,
     _hasSelectedListItemText: theme.selectedListItemText.a === 0 ? true : theme._hasSelectedListItemText,
     dialogBackdrop: TRANSPARENT_DIALOG_BACKDROP,
