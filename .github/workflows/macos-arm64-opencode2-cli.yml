@@ -233,11 +233,14 @@ jobs:
             exit 1
           fi
           # Compile embeds workspace @opencode-ai/tui — verify transparent strings ship.
-          # grep -E only: rg is not installed on macOS-hosted runners.
-          if ! strings "$binary" | grep -Eq 'transparent|ui_transparent|applyUiTransparency|Enable transparent UI'; then
+          # Use grep -a on the binary. Do NOT pipe strings|grep under pipefail:
+          # grep -q exits early → SIGPIPE → strings exit 141 → false "missing markers".
+          if ! grep -aEq 'ui_transparent|applyUiTransparency|Enable transparent UI' "$binary"; then
             echo "Built binary does not contain transparent UI markers" >&2
+            ls -lah "$binary" >&2
             exit 1
           fi
+          echo "transparent UI markers present in built binary"
           install -m 0755 "$binary" "${RUNNER_TEMP}/opencode2"
           ls -lah "${RUNNER_TEMP}/opencode2"
           echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
@@ -263,7 +266,8 @@ jobs:
           echo "binary_bytes=${bytes}"
           if [[ "$SOURCE" == "repo" ]]; then
             # Repo builds must keep the fork TUI command surface.
-            if ! strings "$binary" | grep -Eq 'Enable transparent UI|/transparent|ui_transparent'; then
+            # grep -a (not strings|grep): avoids pipefail/SIGPIPE false negatives on large binaries.
+            if ! grep -aEq 'Enable transparent UI|ui_transparent|toggle-transparent' "$binary"; then
               echo "Repo build missing /transparent command markers" >&2
               exit 1
             fi
