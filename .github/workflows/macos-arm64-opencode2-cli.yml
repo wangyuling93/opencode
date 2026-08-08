@@ -1,17 +1,14 @@
 # Fork-local Apple Silicon release: signed/notarized/stapled macOS arm64 DMG
-# of the official OpenCode2 CLI (same binary as `bun i -g @opencode-ai/cli@next`).
+# of opencode2 built from THIS monorepo so fork TUI features ship (e.g. /transparent).
 #
-# Why download npm@next instead of building packages/cli from this repo?
-# The published next binary is a fuller CLI (directory arg, --standalone,
-# --continue, etc.) than the packages/cli tree currently on this monorepo tip.
-# Building from source here produced a smaller incomplete binary (~97MB) that
-# could not connect OpenCode Go and left a broken TUI. Packaging the npm next
-# artifact matches the working bun install.
+# Default: build packages/cli from the checkout (includes workspace @opencode-ai/tui).
+# Optional: source=npm packages the official @opencode-ai/cli-darwin-arm64 binary
+#           (matches bun i -g @opencode-ai/cli@next, but WITHOUT fork TUI patches).
 #
-# UX: Actions → macos-arm64-opencode2-cli → Run workflow
+# UX: Actions → macos-arm64-opencode2-cli → Run workflow (defaults are enough)
 #
 # Asset: opencode2-cli-mac-arm64.dmg
-# Tag:   macos-arm64-opencode2-v{npm-version}-{7-char commit sha of this workflow repo}
+# Tag:   macos-arm64-opencode2-v{version}-{7-char commit sha}
 
 name: macos-arm64-opencode2-cli
 
@@ -23,8 +20,19 @@ on:
         required: false
         type: boolean
         default: true
+      source:
+        description: >-
+          Binary source. "repo" builds packages/cli from this checkout (includes
+          /transparent and other fork TUI work). "npm" signs official next only
+          (no fork TUI features).
+        required: false
+        type: choice
+        options:
+          - repo
+          - npm
+        default: repo
       npm_dist_tag:
-        description: npm dist-tag of @opencode-ai/cli-darwin-arm64 to sign
+        description: npm dist-tag when source=npm
         required: false
         type: choice
         options:
@@ -34,28 +42,31 @@ on:
           - dev
         default: next
       npm_version:
-        description: >-
-          Exact package version (e.g. 0.0.0-next-17028). Leave empty to use
-          the selected dist-tag.
+        description: Exact npm version when source=npm (optional; overrides dist-tag)
         required: false
         type: string
         default: ""
-      source:
-        description: >-
-          Binary source. "npm" = official published CLI (recommended).
-          "repo" = build packages/cli from this checkout (experimental).
+      channel:
+        description: Channel baked into repo builds (OPENCODE_CHANNEL)
         required: false
         type: choice
         options:
-          - npm
-          - repo
-        default: npm
+          - next
+          - dev
+          - beta
+          - prod
+        default: next
+      sourcemaps:
+        description: Repo builds only — linked sourcemaps (larger binary)
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.npm_version || inputs.npm_dist_tag }}-${{ github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.source }}-${{ inputs.npm_version || inputs.npm_dist_tag || inputs.channel }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -68,27 +79,37 @@ jobs:
       release_name: ${{ steps.resolve.outputs.release_name }}
       npm_spec: ${{ steps.resolve.outputs.npm_spec }}
       source: ${{ steps.resolve.outputs.source }}
+      cli_channel: ${{ steps.resolve.outputs.cli_channel }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           persist-credentials: false
 
-      - name: Resolve version from npm (or repo preview)
+      - name: Resolve version
         id: resolve
         shell: bash
         env:
           INPUT_SOURCE: ${{ inputs.source }}
           INPUT_NPM_TAG: ${{ inputs.npm_dist_tag }}
           INPUT_NPM_VERSION: ${{ inputs.npm_version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
-          source_mode="${INPUT_SOURCE:-npm}"
+          source_mode="${INPUT_SOURCE:-repo}"
           short_sha="${GITHUB_SHA:0:7}"
           if [[ ! "$short_sha" =~ ^[0-9a-f]{7}$ ]]; then
             echo "Invalid GITHUB_SHA" >&2
             exit 1
           fi
 
+          channel="${INPUT_CHANNEL:-next}"
+          case "$channel" in
+            prod) cli_channel="latest" ;;
+            next|dev|beta) cli_channel="$channel" ;;
+            *) echo "Unsupported channel: $channel" >&2; exit 1 ;;
+          esac
+
+          npm_spec=""
           if [[ "$source_mode" == "npm" ]]; then
             if [[ -n "${INPUT_NPM_VERSION:-}" ]]; then
               npm_spec="@opencode-ai/cli-darwin-arm64@${INPUT_NPM_VERSION}"
@@ -102,11 +123,10 @@ jobs:
             fi
             version_source="npm ${npm_spec}"
           else
-            # Experimental monorepo build — preview version for this checkout.
+            # Repo build: preview version tied to channel + UTC stamp (matches packages/script style)
             stamp="$(date -u +%Y%m%d%H%M)"
-            release_version="0.0.0-repo-${stamp}"
-            npm_spec=""
-            version_source="repo packages/cli"
+            release_version="0.0.0-${cli_channel}-${stamp}"
+            version_source="repo packages/cli + packages/tui"
           fi
 
           release_tag="macos-arm64-opencode2-v${release_version}-${short_sha}"
@@ -118,9 +138,10 @@ jobs:
             echo "release_name=${release_name}"
             echo "npm_spec=${npm_spec}"
             echo "source=${source_mode}"
+            echo "cli_channel=${cli_channel}"
           } >>"$GITHUB_OUTPUT"
 
-          echo "source=${source_mode} version=${release_version} from ${version_source}; tag=${release_tag}"
+          echo "source=${source_mode} version=${release_version} channel=${cli_channel} from ${version_source}; tag=${release_tag}"
 
   package-cli:
     needs: resolve-version
@@ -146,96 +167,113 @@ jobs:
           apple-id: ${{ vars.APPLE_ID }}
           apple-team-id: ${{ vars.APPLE_TEAM_ID }}
 
-      - name: Stage official npm next binary
+      # ── npm: official binary (no fork TUI features) ─────────────────────────
+      - name: Stage official npm binary
         if: needs.resolve-version.outputs.source == 'npm'
-        id: stage
+        id: stage_npm
         shell: bash
         env:
           NPM_SPEC: ${{ needs.resolve-version.outputs.npm_spec }}
         run: |
           set -euo pipefail
           stage="${RUNNER_TEMP}/opencode2-npm"
-          rm -rf "$stage"
-          mkdir -p "$stage"
-          cd "$stage"
-          # Prefer npm pack — no monorepo install required.
+          rm -rf "$stage" && mkdir -p "$stage" && cd "$stage"
           tarball="$(npm pack "$NPM_SPEC" --silent)"
           tar -xzf "$tarball"
           binary=""
-          for candidate in \
-            package/bin/opencode2 \
-            package/bin/lildax \
-            package/bin/opencode2.exe \
-            package/bin/lildax.exe
-          do
-            if [[ -f "$candidate" ]]; then
-              binary="$candidate"
-              break
-            fi
+          for candidate in package/bin/opencode2 package/bin/lildax package/bin/opencode2.exe package/bin/lildax.exe; do
+            if [[ -f "$candidate" ]]; then binary="$candidate"; break; fi
           done
           if [[ -z "$binary" ]]; then
-            echo "No CLI binary found in $NPM_SPEC" >&2
-            tar -tzf "$tarball" | head -50 >&2 || true
+            echo "No CLI binary in $NPM_SPEC" >&2
+            tar -tzf "$tarball" | head -40 >&2 || true
             exit 1
           fi
           install -m 0755 "$binary" "${RUNNER_TEMP}/opencode2"
           ls -lah "${RUNNER_TEMP}/opencode2"
           file "${RUNNER_TEMP}/opencode2"
           lipo "${RUNNER_TEMP}/opencode2" -verify_arch arm64
-          version_output="$("${RUNNER_TEMP}/opencode2" --version)"
-          echo "version: $version_output"
           echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
-          bytes="$(wc -c <"${RUNNER_TEMP}/opencode2" | tr -d ' ')"
-          echo "binary_bytes=${bytes}"
-          # Official next is ~145MB; fail early if we grabbed a stub.
-          if [[ "$bytes" -lt 80000000 ]]; then
-            echo "Binary is too small (${bytes} bytes); refusing to package" >&2
-            exit 1
-          fi
 
+      # ── repo: monorepo build (includes /transparent from packages/tui) ──────
       - uses: ./.github/actions/setup-bun
         if: needs.resolve-version.outputs.source == 'repo'
 
-      - name: Build opencode2 from monorepo (experimental)
+      - name: Assert /transparent is present in this checkout
         if: needs.resolve-version.outputs.source == 'repo'
-        id: build
+        shell: bash
         run: |
           set -euo pipefail
-          ./packages/cli/script/build.ts --single --sourcemaps
+          # Fail the release if fork TUI work is missing from the branch we built.
+          rg -n 'slashName: "transparent"' packages/tui/src/app.tsx
+          rg -n 'export function applyUiTransparency' packages/tui/src/theme/index.ts
+          echo "transparent feature markers found in packages/tui"
+
+      - name: Build opencode2 from monorepo
+        if: needs.resolve-version.outputs.source == 'repo'
+        id: stage_repo
+        shell: bash
+        env:
+          OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
+          OPENCODE_CLI_BINARY: opencode2
+        run: |
+          set -euo pipefail
+          args=(--single)
+          if [[ "${{ inputs.sourcemaps }}" == "true" ]]; then
+            args+=(--sourcemaps)
+          fi
+          # Full monorepo install already done by setup-bun (no os/cpu filter).
+          ./packages/cli/script/build.ts "${args[@]}"
           binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
+          if [[ ! -f "$binary" ]]; then
+            echo "Missing $binary" >&2
+            ls -lahR packages/cli/dist || true
+            exit 1
+          fi
+          # Compile embeds workspace @opencode-ai/tui — verify transparent strings ship.
+          if ! strings "$binary" | rg -q 'transparent|ui_transparent|applyUiTransparency|Enable transparent UI'; then
+            echo "Built binary does not contain transparent UI markers" >&2
+            exit 1
+          fi
           install -m 0755 "$binary" "${RUNNER_TEMP}/opencode2"
           ls -lah "${RUNNER_TEMP}/opencode2"
           echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
-        env:
-          OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          OPENCODE_CHANNEL: next
-          OPENCODE_CLI_BINARY: opencode2
 
-      - name: Verify staged binary version
+      - name: Verify staged binary
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          BINARY_PATH: ${{ steps.stage.outputs.path || steps.build.outputs.path }}
+          BINARY_PATH: ${{ steps.stage_npm.outputs.path || steps.stage_repo.outputs.path }}
+          SOURCE: ${{ needs.resolve-version.outputs.source }}
         run: |
           set -euo pipefail
-          binary="${BINARY_PATH}"
-          if [[ ! -f "$binary" ]]; then
-            echo "Missing staged binary" >&2
-            exit 1
-          fi
+          binary="${BINARY_PATH:?missing staged binary path}"
+          chmod 0755 "$binary"
+          ls -lah "$binary"
+          file "$binary"
+          lipo "$binary" -verify_arch arm64
           version_output="$("$binary" --version)"
           echo "version: $version_output"
-          # npm next versions are like 0.0.0-next-17028; require that string to appear.
           [[ "$version_output" == *"${RELEASE_VERSION}"* ]] \
             || { echo "Expected --version to contain ${RELEASE_VERSION}, got: ${version_output}" >&2; exit 1; }
-          lipo "$binary" -verify_arch arm64
+          bytes="$(wc -c <"$binary" | tr -d ' ')"
+          echo "binary_bytes=${bytes}"
+          if [[ "$SOURCE" == "repo" ]]; then
+            # Repo builds must keep the fork TUI command surface.
+            if ! strings "$binary" | rg -q 'Enable transparent UI|/transparent|ui_transparent'; then
+              echo "Repo build missing /transparent command markers" >&2
+              exit 1
+            fi
+            echo "transparent command markers present in binary"
+          fi
 
       - name: Sign, notarize, and staple opencode2 DMG
         env:
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          BINARY_PATH: ${{ steps.stage.outputs.path || steps.build.outputs.path }}
+          BINARY_PATH: ${{ steps.stage_npm.outputs.path || steps.stage_repo.outputs.path }}
           BINARY_NAME: opencode2
           OUTPUT_DMG: ${{ github.workspace }}/dist/release-assets/opencode2-cli-mac-arm64.dmg
           DMG_VOLNAME: OpenCode2 CLI (mac-arm64)
@@ -302,20 +340,20 @@ jobs:
             echo "Signed, notarized, and stapled Apple Silicon (mac-arm64) OpenCode2 CLI."
             echo
             echo "Source: \`${{ needs.resolve-version.outputs.source }}\`"
-            if [[ "${{ needs.resolve-version.outputs.source }}" == "npm" ]]; then
-              echo "npm package: \`${{ needs.resolve-version.outputs.npm_spec }}\`"
+            if [[ "${{ needs.resolve-version.outputs.source }}" == "repo" ]]; then
               echo
-              echo "This is the **same binary** as \`bun i -g @opencode-ai/cli@next\` /"
-              echo "\`@opencode-ai/cli-darwin-arm64@${{ needs.resolve-version.outputs.release_version }}\`,"
-              echo "packaged with Developer ID + notarization for Gatekeeper."
+              echo "Built from this monorepo (\`packages/cli\` + workspace \`packages/tui\`)."
+              echo "Includes fork TUI features such as \`/transparent\`."
+              echo "Channel: \`${{ needs.resolve-version.outputs.cli_channel }}\`"
             else
-              echo "Built experimentally from this monorepo's \`packages/cli\`."
+              echo
+              echo "npm package: \`${{ needs.resolve-version.outputs.npm_spec }}\`"
+              echo "Official published binary only — **no** fork TUI patches (no \`/transparent\`)."
             fi
             echo
             echo "- \`opencode2-cli-mac-arm64.dmg\` — binary \`opencode2\`"
             echo
             echo "Version: \`${{ needs.resolve-version.outputs.release_version }}\`"
-            echo
             echo "Workflow commit: \`${GITHUB_SHA}\` (\`${GITHUB_REF_NAME}\`)."
             echo
             git log -1 --format=%B "${GITHUB_SHA}^{commit}"
