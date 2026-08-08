@@ -87,6 +87,8 @@ type ThemeJson = {
 
 type SharedSyntaxTheme = TuiThemeCurrent & {
   _hasSelectedListItemText: boolean
+  dialogBackdrop: RGBA
+  overlayScrim: RGBA
 }
 
 export const transparent = RGBA.fromValues(0, 0, 0, 0)
@@ -672,9 +674,13 @@ export async function resolveRunTheme(renderer: CliRenderer): Promise<RunTheme> 
     const indexed = indexedPalette(colors, 256)
     const scrollbackTheme = quantizeTheme(footerTheme, indexed)
     const shared = await import("@opencode-ai/tui/context/theme")
+    // Theme gained dialogBackdrop/overlayScrim for transparent UI; syntax helpers
+    // only need syntax tokens but type as full Theme — supply defaults here.
     const syntaxTheme: SharedSyntaxTheme = {
       ...scrollbackTheme,
       _hasSelectedListItemText: true,
+      dialogBackdrop: RGBA.fromInts(0, 0, 0, 150),
+      overlayScrim: RGBA.fromInts(0, 0, 0, 70),
     }
     const syntax = shared.generateSyntax(syntaxTheme)
     return map(
