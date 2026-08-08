@@ -63,9 +63,11 @@ export function Dialog(
         width={width()}
         maxWidth={dimensions().width - 2}
         backgroundColor={plate()}
+        // Grok modal_window: Borders::ALL + border_style fg=gray_dim (muted), square single-line
+        // (ratatui default ┌─┐), not rounded ╭╮ and not double/heavy.
         border
-        borderStyle="rounded"
-        borderColor={theme.border}
+        borderStyle="single"
+        borderColor={theme.borderSubtle}
         paddingTop={1}
         paddingBottom={1}
         paddingLeft={1}
