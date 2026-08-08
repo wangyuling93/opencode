@@ -127,15 +127,17 @@ function clearAlpha(color: RGBA) {
 
 const DEFAULT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 150)
 const DEFAULT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 70)
-const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 60)
-const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 40)
+// Terminal cell backgrounds are not true glass: any non-zero alpha black paints as opaque
+// black over the wallpaper. Keep modal dimmers fully clear under /transparent.
+const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 0)
+const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 0)
 
 /**
  * Transparent UI:
  * - All solid plates go fully clear so the terminal wallpaper shows through:
  *   root canvas, prompt (backgroundElement), slash/autocomplete (backgroundMenu),
- *   and dialog/status/toast shells (backgroundPanel — e.g. /status).
- * - Soft dialogBackdrop / overlayScrim remain slightly tinted for focus, not solid fills.
+ *   dialog/status/toast shells (backgroundPanel), and modal dimmers (dialogBackdrop /
+ *   overlayScrim). Partial-alpha black dimmers paint as solid black in the terminal.
  * - Selection text keeps per-surface contrast via selectedForeground(bg).
  */
 export function applyUiTransparency(theme: Theme): Theme {

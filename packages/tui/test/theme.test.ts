@@ -74,11 +74,9 @@ test("applyUiTransparency clears root fills, prompt, slash menu, and dialog plat
   expect(next.primary.a).toBe(base.primary.a)
   expect(next.text.r).toBe(base.text.r)
   expect(next.selectedListItemText.a).toBeGreaterThan(0)
-  // Softened scrims live in theme tokens (not view-level transparent() branches).
-  expect(next.dialogBackdrop.a).toBeLessThan(base.dialogBackdrop.a)
-  expect(next.overlayScrim.a).toBeLessThan(base.overlayScrim.a)
-  expect(next.dialogBackdrop.a).toBeGreaterThan(0)
-  expect(next.overlayScrim.a).toBeGreaterThan(0)
+  // Modal dimmers must be fully clear — partial black alpha becomes solid black in terminals.
+  expect(next.dialogBackdrop.a).toBe(0)
+  expect(next.overlayScrim.a).toBe(0)
 })
 
 test("applyUiTransparency repairs explicit transparent selectedListItemText", () => {
