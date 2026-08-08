@@ -1,7 +1,7 @@
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
 import { useTheme } from "../context/theme"
-import { MouseButton, Renderable } from "@opentui/core"
+import { MouseButton, Renderable, RGBA } from "@opentui/core"
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
 import { Flag } from "@opencode-ai/core/flag/flag"
@@ -15,7 +15,7 @@ export function Dialog(
   }>,
 ) {
   const dimensions = useTerminalDimensions()
-  const { theme } = useTheme()
+  const { theme, transparent } = useTheme()
   const renderer = useRenderer()
 
   let dismiss = false
@@ -24,6 +24,11 @@ export function Dialog(
     if (props.size === "large") return 88
     return 60
   }
+
+  // Grok Build: Clear.render(modal_area) only — not the whole frame. Under /transparent,
+  // terminal-default fill clears glyphs inside the modal rect (wallpaper stays); alpha-0
+  // does not paint so main UI would bleed through the plate.
+  const plate = () => (transparent() ? RGBA.defaultBackground() : theme.backgroundPanel)
 
   return (
     <box
@@ -57,8 +62,14 @@ export function Dialog(
         }}
         width={width()}
         maxWidth={dimensions().width - 2}
-        backgroundColor={theme.backgroundPanel}
+        backgroundColor={plate()}
+        border
+        borderStyle="rounded"
+        borderColor={theme.border}
         paddingTop={1}
+        paddingBottom={1}
+        paddingLeft={1}
+        paddingRight={1}
       >
         {props.children}
       </box>
@@ -184,8 +195,6 @@ export function DialogProvider(props: ParentProps) {
   const renderer = useRenderer()
   const toast = useToast()
   const clipboard = useClipboard()
-  const { transparent } = useTheme()
-  const dimensions = useTerminalDimensions()
 
   function copySelection() {
     const text = renderer.getSelection()?.getSelectedText()
@@ -198,21 +207,9 @@ export function DialogProvider(props: ParentProps) {
     return true
   }
 
-  // Grok Build: Clear.render(area) then paint only the modal. Under /transparent:
-  // 1) dialogBackdrop is terminal-default bg (fills cells → clears glyphs, wallpaper stays)
-  // 2) hide main tree so it is not repainted under the modal in the same frame
-  const suppressMain = () => value.stack.length > 0 && transparent()
-
   return (
     <ctx.Provider value={value}>
-      <box
-        width={dimensions().width}
-        height={dimensions().height}
-        flexDirection="column"
-        visible={!suppressMain()}
-      >
-        {props.children}
-      </box>
+      {props.children}
       <box
         position="absolute"
         zIndex={3000}

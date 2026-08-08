@@ -127,19 +127,17 @@ function clearAlpha(color: RGBA) {
 
 const DEFAULT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 150)
 const DEFAULT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 70)
-// OpenTUI Box only fills when backgroundColor.a > 0. Alpha-0 black does not paint at all
-// (main UI text bleeds through). RGB black with partial alpha paints solid black cells.
-// INTENT_DEFAULT fills/clears cells (like ratatui Clear) while the terminal still uses its
-// default background — wallpaper shows through.
-const TRANSPARENT_DIALOG_BACKDROP = RGBA.defaultBackground()
-const TRANSPARENT_OVERLAY_SCRIM = RGBA.defaultBackground()
+// Full-screen dimmers stay alpha-0 under /transparent so main UI outside the modal remains.
+// Modal plate clear (Grok-style Clear on modal_area only) is handled in Dialog via
+// RGBA.defaultBackground() on the content-sized box — not the full-screen backdrop.
+const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 0)
+const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 0)
 
 /**
  * Transparent UI:
- * - Root canvas, prompt (backgroundElement), slash/autocomplete (backgroundMenu),
- *   and dialog plates (backgroundPanel) use alpha-0 so wallpaper shows through.
- * - Modal full-screen dimmer uses terminal-default background (a>0, intent default)
- *   so cells under the dialog are cleared without a solid black wash.
+ * - Root canvas, prompt, slash menus, and generic plates use alpha-0 so wallpaper shows.
+ * - Full-screen dialogBackdrop/overlayScrim stay alpha-0 (do not wipe the whole UI).
+ * - Modal content boxes clear only their own rect (see Dialog: defaultBackground + border).
  * - Selection text keeps per-surface contrast via selectedForeground(bg).
  */
 export function applyUiTransparency(theme: Theme): Theme {
@@ -158,7 +156,7 @@ export function applyUiTransparency(theme: Theme): Theme {
     backgroundElement: clearAlpha(theme.backgroundElement),
     // Slash command / autocomplete popup list.
     backgroundMenu: clearAlpha(theme.backgroundMenu),
-    // Dialogs (/status, command palette, etc.), toasts, session side panels.
+    // Generic plates (sidebar, toast, etc.) — wallpaper; modals override plate fill locally.
     backgroundPanel: clearAlpha(theme.backgroundPanel),
     // Large content fills cleared for wallpaper.
     markdownCodeBlock: clearAlpha(theme.markdownCodeBlock),
