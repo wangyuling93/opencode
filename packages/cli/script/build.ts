@@ -9,7 +9,8 @@ import pkg from "../package.json"
 import { modelsData } from "./generate"
 
 const dir = path.resolve(import.meta.dirname, "..")
-const binary = "lildax"
+// Default npm binary is lildax; signed/preview releases can set OPENCODE_CLI_BINARY=opencode2.
+const binary = process.env.OPENCODE_CLI_BINARY || "lildax"
 process.chdir(dir)
 
 await rm("dist", { recursive: true, force: true })

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Resolve release version, tag, name, and desktop/CLI channels for the
-# macos-arm64-signed workflow.
+# macos-arm64 signed workflows.
 #
 # Env inputs:
 #   INPUT_RELEASE_VERSION  optional override
@@ -9,15 +9,23 @@
 #   GITHUB_SHA             required
 #   GITHUB_OUTPUT          required in Actions
 #   WORKSPACE              optional repo root (default cwd)
+#   PACKAGE_JSON           optional path to package.json (default packages/opencode/package.json)
+#   TAG_PREFIX             optional release tag prefix (default macos-arm64-v)
+#   RELEASE_LABEL          optional label embedded in release name (default macos-arm64)
 
 set -euo pipefail
 
 workspace="${WORKSPACE:-.}"
-tag_prefix="macos-arm64-v"
+tag_prefix="${TAG_PREFIX:-macos-arm64-v}"
+release_label="${RELEASE_LABEL:-macos-arm64}"
 short_sha_re='[0-9a-f]{7}'
 version_re='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
 
-package_json="${workspace}/packages/opencode/package.json"
+if [[ -n "${PACKAGE_JSON:-}" ]]; then
+  package_json="${PACKAGE_JSON}"
+else
+  package_json="${workspace}/packages/opencode/package.json"
+fi
 if [[ ! -f "$package_json" ]]; then
   echo "Missing $package_json" >&2
   exit 1
@@ -43,7 +51,7 @@ if [[ -n "${INPUT_RELEASE_VERSION:-}" ]]; then
   version_source="workflow input"
 else
   release_version="${source_version}"
-  version_source="packages/opencode/package.json"
+  version_source="${package_json#"${workspace}/"}"
 fi
 
 if [[ ! "${release_version}" =~ ^${version_re}$ ]]; then
@@ -69,7 +77,7 @@ fi
 
 # Always bind the tag to the built commit. No fixed-tag override.
 release_tag="${tag_prefix}${release_version}-${short_sha}"
-release_name="${release_version} (macos-arm64 ${short_sha})"
+release_name="${release_version} (${release_label} ${short_sha})"
 
 # Desktop channel vs Script channel: prod embeds "latest" in the CLI binary.
 channel="${INPUT_CHANNEL:-prod}"

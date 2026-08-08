@@ -11,6 +11,7 @@
 #   OUTPUT_DMG         default: dist/release-assets/opencode-cli-mac-arm64.dmg
 #   ENTITLEMENTS       default: .github/scripts/macos-signing/opencode.entitlements.plist
 #   BINARY_NAME        default: opencode
+#   DMG_VOLNAME        default: OpenCode CLI (mac-arm64)
 #   NOTARY_TIMEOUT     default: 45m
 #   REPORT_DIR         default: macos-notarization/cli-mac-arm64
 
@@ -30,6 +31,7 @@ output_dmg="${OUTPUT_DMG:-${workspace}/dist/release-assets/opencode-cli-mac-arm6
 entitlements="${ENTITLEMENTS:-${script_dir}/opencode.entitlements.plist}"
 report_dir="${REPORT_DIR:-${workspace}/macos-notarization/cli-mac-arm64}"
 notary_timeout="${NOTARY_TIMEOUT:-45m}"
+dmg_volname="${DMG_VOLNAME:-OpenCode CLI (mac-arm64)}"
 verify_entitlements="${script_dir}/verify_entitlements.sh"
 
 if [[ ! -f "$binary_path" ]]; then
@@ -77,7 +79,7 @@ tmp_dmg="${RUNNER_TEMP:-/tmp}/opencode-cli-mac-arm64.dmg"
 rm -f "$tmp_dmg"
 
 hdiutil create \
-  -volname "OpenCode CLI (mac-arm64)" \
+  -volname "$dmg_volname" \
   -srcfolder "$dmg_root" \
   -format UDZO \
   -ov \

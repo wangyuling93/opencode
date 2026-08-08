@@ -7,6 +7,8 @@ import { Commands } from "./commands/commands"
 import { Runtime } from "./framework/runtime"
 import { Daemon } from "./services/daemon"
 
+declare const OPENCODE_VERSION: string | undefined
+
 const Handlers = Runtime.handlers(Commands, {
   $: () => import("./commands/handlers/default"),
   api: () => import("./commands/handlers/api"),
@@ -24,7 +26,9 @@ const Handlers = Runtime.handlers(Commands, {
   serve: () => import("./commands/handlers/serve"),
 })
 
-Runtime.run(Commands, Handlers, { version: "local" }).pipe(
+const version = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
+
+Runtime.run(Commands, Handlers, { version }).pipe(
   Effect.provide(Daemon.layer),
   Effect.provide(NodeServices.layer),
   Effect.scoped,
