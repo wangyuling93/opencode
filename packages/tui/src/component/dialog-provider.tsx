@@ -289,7 +289,7 @@ function AutoMethod(props: AutoMethodProps) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           {props.title}
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.warning} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

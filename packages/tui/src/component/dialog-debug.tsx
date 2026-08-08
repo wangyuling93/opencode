@@ -56,7 +56,7 @@ export function DialogDebug() {
         <text fg={theme.text} attributes={TextAttributes.BOLD}>
           Debug
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.warning} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

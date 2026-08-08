@@ -46,7 +46,7 @@ export function DialogStatus() {
         <text fg={theme.text} attributes={TextAttributes.BOLD}>
           Status
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.warning} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

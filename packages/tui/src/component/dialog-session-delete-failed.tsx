@@ -56,7 +56,7 @@ export function DialogSessionDeleteFailed(props: {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           Failed to Delete Session
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.warning} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

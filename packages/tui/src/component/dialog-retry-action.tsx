@@ -90,7 +90,7 @@ export function DialogRetryAction(props: DialogRetryActionProps) {
           <text attributes={TextAttributes.BOLD} fg={theme.text} bg={textBg()}>
             {props.title}
           </text>
-          <text fg={theme.textMuted} bg={textBg()} onMouseUp={() => dialog.clear()}>
+          <text fg={theme.warning} bg={textBg()} onMouseUp={() => dialog.clear()}>
             esc
           </text>
         </box>
