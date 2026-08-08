@@ -32,6 +32,8 @@ function dismiss(props: DialogRetryActionProps, dialog: ReturnType<typeof useDia
 }
 
 function panelOverlay(color: RGBA) {
+  // Don't re-solidify a cleared plate under /transparent — keep wallpaper visible.
+  if (color.a === 0) return color
   const [r, g, b] = color.toInts()
   return RGBA.fromInts(r, g, b, FOREGROUND_ALPHA)
 }
