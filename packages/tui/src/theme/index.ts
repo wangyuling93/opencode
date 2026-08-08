@@ -127,17 +127,19 @@ function clearAlpha(color: RGBA) {
 
 const DEFAULT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 150)
 const DEFAULT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 70)
-// Terminal cell backgrounds are not true glass: any non-zero alpha black paints as opaque
-// black over the wallpaper. Keep modal dimmers fully clear under /transparent.
-const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 0)
-const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 0)
+// OpenTUI Box only fills when backgroundColor.a > 0. Alpha-0 black does not paint at all
+// (main UI text bleeds through). RGB black with partial alpha paints solid black cells.
+// INTENT_DEFAULT fills/clears cells (like ratatui Clear) while the terminal still uses its
+// default background — wallpaper shows through.
+const TRANSPARENT_DIALOG_BACKDROP = RGBA.defaultBackground()
+const TRANSPARENT_OVERLAY_SCRIM = RGBA.defaultBackground()
 
 /**
  * Transparent UI:
- * - All solid plates go fully clear so the terminal wallpaper shows through:
- *   root canvas, prompt (backgroundElement), slash/autocomplete (backgroundMenu),
- *   dialog/status/toast shells (backgroundPanel), and modal dimmers (dialogBackdrop /
- *   overlayScrim). Partial-alpha black dimmers paint as solid black in the terminal.
+ * - Root canvas, prompt (backgroundElement), slash/autocomplete (backgroundMenu),
+ *   and dialog plates (backgroundPanel) use alpha-0 so wallpaper shows through.
+ * - Modal full-screen dimmer uses terminal-default background (a>0, intent default)
+ *   so cells under the dialog are cleared without a solid black wash.
  * - Selection text keeps per-surface contrast via selectedForeground(bg).
  */
 export function applyUiTransparency(theme: Theme): Theme {

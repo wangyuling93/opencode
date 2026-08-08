@@ -74,9 +74,12 @@ test("applyUiTransparency clears root fills, prompt, slash menu, and dialog plat
   expect(next.primary.a).toBe(base.primary.a)
   expect(next.text.r).toBe(base.text.r)
   expect(next.selectedListItemText.a).toBeGreaterThan(0)
-  // Modal dimmers must be fully clear — partial black alpha becomes solid black in terminals.
-  expect(next.dialogBackdrop.a).toBe(0)
-  expect(next.overlayScrim.a).toBe(0)
+  // Modal dimmer must paint (a>0) to clear underlying cells, but use terminal default bg
+  // (wallpaper) — not an opaque RGB black wash.
+  expect(next.dialogBackdrop.a).toBeGreaterThan(0)
+  expect(next.dialogBackdrop.intent).toBe("default")
+  expect(next.overlayScrim.a).toBeGreaterThan(0)
+  expect(next.overlayScrim.intent).toBe("default")
 })
 
 test("applyUiTransparency repairs explicit transparent selectedListItemText", () => {
