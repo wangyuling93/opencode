@@ -1,16 +1,17 @@
-# Fork-local Apple Silicon release: signed, notarized, and stapled macOS arm64
-# DMG for the preview CLI from packages/cli (binary name: opencode2).
+# Fork-local Apple Silicon release: signed/notarized/stapled macOS arm64 DMG
+# of the official OpenCode2 CLI (same binary as `bun i -g @opencode-ai/cli@next`).
 #
-# Default is a real "next"-style build:
-#   OPENCODE_CHANNEL=next
-#   OPENCODE_VERSION=0.0.0-next-<stamp><sha>
-#   full bun install (no os/cpu filter)
-#   optional --sourcemaps (on by default for next-size parity)
+# Why download npm@next instead of building packages/cli from this repo?
+# The published next binary is a fuller CLI (directory arg, --standalone,
+# --continue, etc.) than the packages/cli tree currently on this monorepo tip.
+# Building from source here produced a smaller incomplete binary (~97MB) that
+# could not connect OpenCode Go and left a broken TUI. Packaging the npm next
+# artifact matches the working bun install.
 #
-# UX: one manual click — Actions → macos-arm64-opencode2-cli → Run workflow
+# UX: Actions → macos-arm64-opencode2-cli → Run workflow
 #
 # Asset: opencode2-cli-mac-arm64.dmg
-# Tag:   macos-arm64-opencode2-v{version}-{7-char commit sha}
+# Tag:   macos-arm64-opencode2-v{npm-version}-{7-char commit sha of this workflow repo}
 
 name: macos-arm64-opencode2-cli
 
@@ -22,36 +23,39 @@ on:
         required: false
         type: boolean
         default: true
-      release_version:
-        description: >-
-          Version embedded in the binary. Leave empty for a next/preview auto
-          version (0.0.0-next-…). Only set a stable x.y.z when channel is prod.
-        required: false
-        type: string
-        default: ""
-      channel:
-        description: >-
-          CLI channel baked into the binary. Use "next" for official-next-style
-          preview builds (recommended).
+      npm_dist_tag:
+        description: npm dist-tag of @opencode-ai/cli-darwin-arm64 to sign
         required: false
         type: choice
         options:
           - next
-          - dev
           - beta
-          - prod
+          - latest
+          - dev
         default: next
-      sourcemaps:
-        description: Build with linked sourcemaps (larger binary; closer to next/beta)
+      npm_version:
+        description: >-
+          Exact package version (e.g. 0.0.0-next-17028). Leave empty to use
+          the selected dist-tag.
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: ""
+      source:
+        description: >-
+          Binary source. "npm" = official published CLI (recommended).
+          "repo" = build packages/cli from this checkout (experimental).
+        required: false
+        type: choice
+        options:
+          - npm
+          - repo
+        default: npm
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.release_version || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.npm_version || inputs.npm_dist_tag }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -62,31 +66,66 @@ jobs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
       release_version: ${{ steps.resolve.outputs.release_version }}
       release_name: ${{ steps.resolve.outputs.release_name }}
-      channel: ${{ steps.resolve.outputs.channel }}
-      cli_channel: ${{ steps.resolve.outputs.cli_channel }}
+      npm_spec: ${{ steps.resolve.outputs.npm_spec }}
+      source: ${{ steps.resolve.outputs.source }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           persist-credentials: false
 
-      - name: Resolve release version and tag
+      - name: Resolve version from npm (or repo preview)
         id: resolve
         shell: bash
         env:
-          INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
-          INPUT_CHANNEL: ${{ inputs.channel }}
-          WORKSPACE: ${{ github.workspace }}
-          PACKAGE_JSON: ${{ github.workspace }}/packages/cli/package.json
-          TAG_PREFIX: macos-arm64-opencode2-v
-          RELEASE_LABEL: macos-arm64-opencode2
-          # next/dev/beta use 0.0.0-<channel>-* versions like official preview builds
-          ALLOW_PREVIEW_VERSION: "true"
-        run: ./.github/scripts/macos-signing/resolve_release.sh
+          INPUT_SOURCE: ${{ inputs.source }}
+          INPUT_NPM_TAG: ${{ inputs.npm_dist_tag }}
+          INPUT_NPM_VERSION: ${{ inputs.npm_version }}
+        run: |
+          set -euo pipefail
+          source_mode="${INPUT_SOURCE:-npm}"
+          short_sha="${GITHUB_SHA:0:7}"
+          if [[ ! "$short_sha" =~ ^[0-9a-f]{7}$ ]]; then
+            echo "Invalid GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          if [[ "$source_mode" == "npm" ]]; then
+            if [[ -n "${INPUT_NPM_VERSION:-}" ]]; then
+              npm_spec="@opencode-ai/cli-darwin-arm64@${INPUT_NPM_VERSION}"
+            else
+              npm_spec="@opencode-ai/cli-darwin-arm64@${INPUT_NPM_TAG:-next}"
+            fi
+            release_version="$(npm view "$npm_spec" version)"
+            if [[ -z "$release_version" ]]; then
+              echo "Could not resolve version for $npm_spec" >&2
+              exit 1
+            fi
+            version_source="npm ${npm_spec}"
+          else
+            # Experimental monorepo build — preview version for this checkout.
+            stamp="$(date -u +%Y%m%d%H%M)"
+            release_version="0.0.0-repo-${stamp}"
+            npm_spec=""
+            version_source="repo packages/cli"
+          fi
+
+          release_tag="macos-arm64-opencode2-v${release_version}-${short_sha}"
+          release_name="${release_version} (macos-arm64-opencode2 ${short_sha})"
+
+          {
+            echo "release_tag=${release_tag}"
+            echo "release_version=${release_version}"
+            echo "release_name=${release_name}"
+            echo "npm_spec=${npm_spec}"
+            echo "source=${source_mode}"
+          } >>"$GITHUB_OUTPUT"
+
+          echo "source=${source_mode} version=${release_version} from ${version_source}; tag=${release_tag}"
 
   package-cli:
     needs: resolve-version
     name: opencode2 CLI DMG
-    runs-on: macos-26
+    runs-on: macos-latest
     timeout-minutes: 120
     environment:
       name: codesigning
@@ -107,57 +146,96 @@ jobs:
           apple-id: ${{ vars.APPLE_ID }}
           apple-team-id: ${{ vars.APPLE_TEAM_ID }}
 
-      # Full install like upstream publish — do not filter os/cpu (incomplete natives
-      # produce a smaller, broken binary that cannot talk to opencode go properly).
-      - uses: ./.github/actions/setup-bun
-
-      - name: Build opencode2 CLI (darwin-arm64)
+      - name: Stage official npm next binary
+        if: needs.resolve-version.outputs.source == 'npm'
+        id: stage
+        shell: bash
+        env:
+          NPM_SPEC: ${{ needs.resolve-version.outputs.npm_spec }}
         run: |
           set -euo pipefail
-          args=(--single)
-          if [[ "${{ inputs.sourcemaps }}" == "true" ]]; then
-            args+=(--sourcemaps)
+          stage="${RUNNER_TEMP}/opencode2-npm"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          cd "$stage"
+          # Prefer npm pack — no monorepo install required.
+          tarball="$(npm pack "$NPM_SPEC" --silent)"
+          tar -xzf "$tarball"
+          binary=""
+          for candidate in \
+            package/bin/opencode2 \
+            package/bin/lildax \
+            package/bin/opencode2.exe \
+            package/bin/lildax.exe
+          do
+            if [[ -f "$candidate" ]]; then
+              binary="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$binary" ]]; then
+            echo "No CLI binary found in $NPM_SPEC" >&2
+            tar -tzf "$tarball" | head -50 >&2 || true
+            exit 1
           fi
-          ./packages/cli/script/build.ts "${args[@]}"
+          install -m 0755 "$binary" "${RUNNER_TEMP}/opencode2"
+          ls -lah "${RUNNER_TEMP}/opencode2"
+          file "${RUNNER_TEMP}/opencode2"
+          lipo "${RUNNER_TEMP}/opencode2" -verify_arch arm64
+          version_output="$("${RUNNER_TEMP}/opencode2" --version)"
+          echo "version: $version_output"
+          echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
+          bytes="$(wc -c <"${RUNNER_TEMP}/opencode2" | tr -d ' ')"
+          echo "binary_bytes=${bytes}"
+          # Official next is ~145MB; fail early if we grabbed a stub.
+          if [[ "$bytes" -lt 80000000 ]]; then
+            echo "Binary is too small (${bytes} bytes); refusing to package" >&2
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-bun
+        if: needs.resolve-version.outputs.source == 'repo'
+
+      - name: Build opencode2 from monorepo (experimental)
+        if: needs.resolve-version.outputs.source == 'repo'
+        id: build
+        run: |
+          set -euo pipefail
+          ./packages/cli/script/build.ts --single --sourcemaps
+          binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
+          install -m 0755 "$binary" "${RUNNER_TEMP}/opencode2"
+          ls -lah "${RUNNER_TEMP}/opencode2"
+          echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
+          OPENCODE_CHANNEL: next
           OPENCODE_CLI_BINARY: opencode2
 
-      - name: Verify opencode2 binary
+      - name: Verify staged binary version
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          CLI_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
+          BINARY_PATH: ${{ steps.stage.outputs.path || steps.build.outputs.path }}
         run: |
           set -euo pipefail
-          binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
+          binary="${BINARY_PATH}"
           if [[ ! -f "$binary" ]]; then
-            echo "Missing CLI binary: $binary" >&2
-            ls -lahR packages/cli/dist || true
+            echo "Missing staged binary" >&2
             exit 1
           fi
-          chmod 0755 "$binary"
-          ls -lah "$binary"
           version_output="$("$binary" --version)"
           echo "version: $version_output"
-          echo "channel: $CLI_CHANNEL"
+          # npm next versions are like 0.0.0-next-17028; require that string to appear.
           [[ "$version_output" == *"${RELEASE_VERSION}"* ]] \
-            || { echo "Expected opencode2 --version to contain ${RELEASE_VERSION}" >&2; exit 1; }
+            || { echo "Expected --version to contain ${RELEASE_VERSION}, got: ${version_output}" >&2; exit 1; }
           lipo "$binary" -verify_arch arm64
-          # Sanity: real next-style builds are typically >100MB with sourcemaps.
-          bytes="$(wc -c <"$binary" | tr -d ' ')"
-          echo "binary_bytes=${bytes}"
-          if [[ "${{ inputs.sourcemaps }}" == "true" && "$bytes" -lt 100000000 ]]; then
-            echo "Warning: binary is smaller than expected for a sourcemap next build (${bytes} bytes)" >&2
-          fi
 
       - name: Sign, notarize, and staple opencode2 DMG
         env:
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          BINARY_PATH: ${{ github.workspace }}/packages/cli/dist/cli-darwin-arm64/bin/opencode2
+          BINARY_PATH: ${{ steps.stage.outputs.path || steps.build.outputs.path }}
           BINARY_NAME: opencode2
           OUTPUT_DMG: ${{ github.workspace }}/dist/release-assets/opencode2-cli-mac-arm64.dmg
           DMG_VOLNAME: OpenCode2 CLI (mac-arm64)
@@ -221,20 +299,24 @@ jobs:
           set -euo pipefail
           notes_path="${RUNNER_TEMP}/release-notes.md"
           {
-            echo "Signed, notarized, and stapled Apple Silicon (mac-arm64) build of the preview CLI (\`opencode2\`) from \`packages/cli\`."
+            echo "Signed, notarized, and stapled Apple Silicon (mac-arm64) OpenCode2 CLI."
             echo
-            echo "This is a **next-style** preview build (channel + version), not the stable \`latest\`/prod package layout."
+            echo "Source: \`${{ needs.resolve-version.outputs.source }}\`"
+            if [[ "${{ needs.resolve-version.outputs.source }}" == "npm" ]]; then
+              echo "npm package: \`${{ needs.resolve-version.outputs.npm_spec }}\`"
+              echo
+              echo "This is the **same binary** as \`bun i -g @opencode-ai/cli@next\` /"
+              echo "\`@opencode-ai/cli-darwin-arm64@${{ needs.resolve-version.outputs.release_version }}\`,"
+              echo "packaged with Developer ID + notarization for Gatekeeper."
+            else
+              echo "Built experimentally from this monorepo's \`packages/cli\`."
+            fi
             echo
-            echo "Asset (hard-verified for codesign + staple before publish):"
+            echo "- \`opencode2-cli-mac-arm64.dmg\` — binary \`opencode2\`"
             echo
-            echo "- \`opencode2-cli-mac-arm64.dmg\` — preview CLI binary \`opencode2\`"
-            echo
-            echo "Channel: \`${{ needs.resolve-version.outputs.cli_channel }}\`"
             echo "Version: \`${{ needs.resolve-version.outputs.release_version }}\`"
             echo
-            echo "Built from \`${GITHUB_SHA}\` on branch \`${GITHUB_REF_NAME}\`."
-            echo
-            echo "This is **not** the classic \`opencode\` CLI (that is \`macos-arm64-signed\`)."
+            echo "Workflow commit: \`${GITHUB_SHA}\` (\`${GITHUB_REF_NAME}\`)."
             echo
             git log -1 --format=%B "${GITHUB_SHA}^{commit}"
           } > "${notes_path}"
