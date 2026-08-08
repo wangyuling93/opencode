@@ -184,6 +184,8 @@ export function DialogProvider(props: ParentProps) {
   const renderer = useRenderer()
   const toast = useToast()
   const clipboard = useClipboard()
+  const { theme, transparent } = useTheme()
+  const dimensions = useTerminalDimensions()
 
   function copySelection() {
     const text = renderer.getSelection()?.getSelectedText()
@@ -196,9 +198,29 @@ export function DialogProvider(props: ParentProps) {
     return true
   }
 
+  // Grok Build paints modals with ratatui `Clear` (and often skips the main frame)
+  // so underlying text never bleeds through. Under /transparent our dialog plates
+  // are alpha-0, so stacked main UI text remains visible — hide the main tree while
+  // a modal is open and leave a full-size clear plate for wallpaper only.
+  const suppressMain = () => value.stack.length > 0 && transparent()
+
   return (
     <ctx.Provider value={value}>
-      {props.children}
+      <box
+        width={dimensions().width}
+        height={dimensions().height}
+        flexDirection="column"
+        visible={!suppressMain()}
+      >
+        {props.children}
+      </box>
+      <Show when={suppressMain()}>
+        <box
+          width={dimensions().width}
+          height={dimensions().height}
+          backgroundColor={theme.background}
+        />
+      </Show>
       <box
         position="absolute"
         zIndex={3000}
