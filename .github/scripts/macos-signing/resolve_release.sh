@@ -5,21 +5,45 @@
 #
 # Env inputs:
 #   INPUT_RELEASE_VERSION  optional override
-#   INPUT_CHANNEL          prod|beta|dev (default prod)
+#   INPUT_CHANNEL          prod|beta|dev|next (default prod)
 #   GITHUB_SHA             required
 #   GITHUB_OUTPUT          required in Actions
 #   WORKSPACE              optional repo root (default cwd)
 #   PACKAGE_JSON           optional path to package.json (default packages/opencode/package.json)
 #   TAG_PREFIX             optional release tag prefix (default macos-arm64-v)
 #   RELEASE_LABEL          optional label embedded in release name (default macos-arm64)
+#   ALLOW_PREVIEW_VERSION  if true, allow 0.0.0-<channel>-* versions (default false)
 
 set -euo pipefail
 
 workspace="${WORKSPACE:-.}"
 tag_prefix="${TAG_PREFIX:-macos-arm64-v}"
 release_label="${RELEASE_LABEL:-macos-arm64}"
+allow_preview_version="${ALLOW_PREVIEW_VERSION:-false}"
 short_sha_re='[0-9a-f]{7}'
 version_re='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
+
+if [[ -z "${GITHUB_SHA:-}" || "${#GITHUB_SHA}" -lt 7 ]]; then
+  echo "GITHUB_SHA is missing or too short" >&2
+  exit 1
+fi
+
+short_sha="${GITHUB_SHA:0:7}"
+if [[ ! "${short_sha}" =~ ^${short_sha_re}$ ]]; then
+  echo "Could not derive a 7-character commit sha from GITHUB_SHA='${GITHUB_SHA}'" >&2
+  exit 1
+fi
+
+# Desktop channel vs Script channel: prod embeds "latest" in the CLI binary.
+channel="${INPUT_CHANNEL:-prod}"
+case "${channel}" in
+  prod) cli_channel="latest" ;;
+  beta|dev|next) cli_channel="${channel}" ;;
+  *)
+    echo "Unsupported channel '${channel}'" >&2
+    exit 1
+    ;;
+esac
 
 if [[ -n "${PACKAGE_JSON:-}" ]]; then
   package_json="${PACKAGE_JSON}"
@@ -49,6 +73,11 @@ PY
 if [[ -n "${INPUT_RELEASE_VERSION:-}" ]]; then
   release_version="${INPUT_RELEASE_VERSION}"
   version_source="workflow input"
+elif [[ "$cli_channel" != "latest" && "$allow_preview_version" == "true" ]]; then
+  # Match packages/script preview style: 0.0.0-<channel>-YYYYMMDDHHMM
+  stamp="$(date -u +%Y%m%d%H%M)"
+  release_version="0.0.0-${cli_channel}-${stamp}"
+  version_source="preview auto (${cli_channel})"
 else
   release_version="${source_version}"
   version_source="${package_json#"${workspace}/"}"
@@ -59,36 +88,19 @@ if [[ ! "${release_version}" =~ ^${version_re}$ ]]; then
   exit 1
 fi
 
-if [[ "${release_version}" == "0.0.0" || "${release_version}" == 0.0.0-* ]]; then
+if [[ "${release_version}" == "0.0.0" ]]; then
   echo "Refusing placeholder version '${release_version}'" >&2
   exit 1
 fi
 
-if [[ -z "${GITHUB_SHA:-}" || "${#GITHUB_SHA}" -lt 7 ]]; then
-  echo "GITHUB_SHA is missing or too short" >&2
-  exit 1
-fi
-
-short_sha="${GITHUB_SHA:0:7}"
-if [[ ! "${short_sha}" =~ ^${short_sha_re}$ ]]; then
-  echo "Could not derive a 7-character commit sha from GITHUB_SHA='${GITHUB_SHA}'" >&2
+if [[ "${release_version}" == 0.0.0-* && "$allow_preview_version" != "true" ]]; then
+  echo "Refusing preview version '${release_version}' (set ALLOW_PREVIEW_VERSION=true)" >&2
   exit 1
 fi
 
 # Always bind the tag to the built commit. No fixed-tag override.
 release_tag="${tag_prefix}${release_version}-${short_sha}"
 release_name="${release_version} (${release_label} ${short_sha})"
-
-# Desktop channel vs Script channel: prod embeds "latest" in the CLI binary.
-channel="${INPUT_CHANNEL:-prod}"
-case "${channel}" in
-  prod) cli_channel="latest" ;;
-  beta|dev) cli_channel="${channel}" ;;
-  *)
-    echo "Unsupported channel '${channel}'" >&2
-    exit 1
-    ;;
-esac
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {

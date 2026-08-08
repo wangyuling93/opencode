@@ -1,18 +1,13 @@
 # Fork-local Apple Silicon release: signed, notarized, and stapled macOS arm64
 # DMG for the preview CLI from packages/cli (binary name: opencode2).
 #
+# Default is a real "next"-style build:
+#   OPENCODE_CHANNEL=next
+#   OPENCODE_VERSION=0.0.0-next-<stamp><sha>
+#   full bun install (no os/cpu filter)
+#   optional --sourcemaps (on by default for next-size parity)
+#
 # UX: one manual click — Actions → macos-arm64-opencode2-cli → Run workflow
-#
-# This is separate from macos-arm64-signed (classic opencode + desktop).
-# Source: packages/cli  →  binary opencode2  →  opencode2-cli-mac-arm64.dmg
-#
-# codesigning environment (secrets/vars):
-#   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
-#            APPLE_APP_SPECIFIC_PASSWORD
-#   variables: APPLE_ID, APPLE_TEAM_ID
-#
-# Setup:
-#   ./.github/scripts/setup-macos-signing-secrets.sh --repo OWNER/REPO
 #
 # Asset: opencode2-cli-mac-arm64.dmg
 # Tag:   macos-arm64-opencode2-v{version}-{7-char commit sha}
@@ -29,20 +24,28 @@ on:
         default: true
       release_version:
         description: >-
-          Version embedded in the binary. Leave empty to use
-          packages/cli/package.json (for example, 1.18.15).
+          Version embedded in the binary. Leave empty for a next/preview auto
+          version (0.0.0-next-…). Only set a stable x.y.z when channel is prod.
         required: false
         type: string
         default: ""
       channel:
-        description: CLI channel embedded in the binary (prod → latest, beta, or dev)
+        description: >-
+          CLI channel baked into the binary. Use "next" for official-next-style
+          preview builds (recommended).
         required: false
         type: choice
         options:
-          - prod
-          - beta
+          - next
           - dev
-        default: prod
+          - beta
+          - prod
+        default: next
+      sourcemaps:
+        description: Build with linked sourcemaps (larger binary; closer to next/beta)
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -76,6 +79,8 @@ jobs:
           PACKAGE_JSON: ${{ github.workspace }}/packages/cli/package.json
           TAG_PREFIX: macos-arm64-opencode2-v
           RELEASE_LABEL: macos-arm64-opencode2
+          # next/dev/beta use 0.0.0-<channel>-* versions like official preview builds
+          ALLOW_PREVIEW_VERSION: "true"
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
   package-cli:
@@ -102,12 +107,18 @@ jobs:
           apple-id: ${{ vars.APPLE_ID }}
           apple-team-id: ${{ vars.APPLE_TEAM_ID }}
 
+      # Full install like upstream publish — do not filter os/cpu (incomplete natives
+      # produce a smaller, broken binary that cannot talk to opencode go properly).
       - uses: ./.github/actions/setup-bun
-        with:
-          install-flags: --os=darwin --cpu=arm64
 
       - name: Build opencode2 CLI (darwin-arm64)
-        run: ./packages/cli/script/build.ts --single
+        run: |
+          set -euo pipefail
+          args=(--single)
+          if [[ "${{ inputs.sourcemaps }}" == "true" ]]; then
+            args+=(--sourcemaps)
+          fi
+          ./packages/cli/script/build.ts "${args[@]}"
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
@@ -117,6 +128,7 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          CLI_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
         run: |
           set -euo pipefail
           binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
@@ -126,11 +138,19 @@ jobs:
             exit 1
           fi
           chmod 0755 "$binary"
+          ls -lah "$binary"
           version_output="$("$binary" --version)"
-          echo "$version_output"
+          echo "version: $version_output"
+          echo "channel: $CLI_CHANNEL"
           [[ "$version_output" == *"${RELEASE_VERSION}"* ]] \
             || { echo "Expected opencode2 --version to contain ${RELEASE_VERSION}" >&2; exit 1; }
           lipo "$binary" -verify_arch arm64
+          # Sanity: real next-style builds are typically >100MB with sourcemaps.
+          bytes="$(wc -c <"$binary" | tr -d ' ')"
+          echo "binary_bytes=${bytes}"
+          if [[ "${{ inputs.sourcemaps }}" == "true" && "$bytes" -lt 100000000 ]]; then
+            echo "Warning: binary is smaller than expected for a sourcemap next build (${bytes} bytes)" >&2
+          fi
 
       - name: Sign, notarize, and staple opencode2 DMG
         env:
@@ -203,11 +223,14 @@ jobs:
           {
             echo "Signed, notarized, and stapled Apple Silicon (mac-arm64) build of the preview CLI (\`opencode2\`) from \`packages/cli\`."
             echo
+            echo "This is a **next-style** preview build (channel + version), not the stable \`latest\`/prod package layout."
+            echo
             echo "Asset (hard-verified for codesign + staple before publish):"
             echo
             echo "- \`opencode2-cli-mac-arm64.dmg\` — preview CLI binary \`opencode2\`"
             echo
-            echo "Channel: \`${{ needs.resolve-version.outputs.channel }}\`"
+            echo "Channel: \`${{ needs.resolve-version.outputs.cli_channel }}\`"
+            echo "Version: \`${{ needs.resolve-version.outputs.release_version }}\`"
             echo
             echo "Built from \`${GITHUB_SHA}\` on branch \`${GITHUB_REF_NAME}\`."
             echo
