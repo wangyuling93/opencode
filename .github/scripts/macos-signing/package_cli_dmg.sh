@@ -57,6 +57,7 @@ sign() {
 }
 
 chmod 0755 "$binary_path"
+ls -lah "$binary_path"
 
 sign "$binary_path" \
   --options runtime \
@@ -68,22 +69,57 @@ lipo "$binary_path" -verify_arch arm64
 codesign --verify --strict --verbose=2 "$binary_path"
 "$verify_entitlements" "$binary_path" "$entitlements"
 
+# Stage the binary under RUNNER_TEMP first so we can free the monorepo install
+# footprint (node_modules / package dists) before hdiutil, which needs substantial
+# free space for UDZO intermediate images.
 dmg_root="${RUNNER_TEMP:-/tmp}/opencode-cli-dmg-root"
 rm -rf "$dmg_root"
 mkdir -p "$dmg_root"
 ditto "$binary_path" "${dmg_root}/${binary_name}"
+ls -lah "${dmg_root}/${binary_name}"
+du -sh "$dmg_root"
+
+"${script_dir}/free_packaging_space.sh"
 
 stage_dir="$(dirname "$output_dmg")"
 mkdir -p "$stage_dir" "$report_dir"
-tmp_dmg="${RUNNER_TEMP:-/tmp}/opencode-cli-mac-arm64.dmg"
+tmp_dmg="${RUNNER_TEMP:-/tmp}/opencode-cli-${binary_name}-mac-arm64.dmg"
 rm -f "$tmp_dmg"
 
+# Prefer a sized read/write image + convert: uses less peak free space than some
+# -srcfolder UDZO paths on constrained runners, and fails earlier with clear sizes.
+content_kb="$(du -sk "$dmg_root" | awk '{print $1}')"
+# 40% headroom + 64MB floor for HFS+ overhead.
+image_mb="$(( (content_kb * 14 / 10 / 1024) + 64 ))"
+if [[ "$image_mb" -lt 128 ]]; then
+  image_mb=128
+fi
+echo "Creating ${image_mb}MB intermediate DMG for ${content_kb}KB payload"
+
+rw_dmg="${RUNNER_TEMP:-/tmp}/opencode-cli-${binary_name}-rw.dmg"
+rm -f "$rw_dmg"
 hdiutil create \
+  -size "${image_mb}m" \
+  -fs HFS+ \
   -volname "$dmg_volname" \
-  -srcfolder "$dmg_root" \
-  -format UDZO \
   -ov \
-  "$tmp_dmg"
+  "$rw_dmg"
+
+attach_dir="${RUNNER_TEMP:-/tmp}/opencode-cli-dmg-attach"
+rm -rf "$attach_dir"
+mkdir -p "$attach_dir"
+hdiutil attach "$rw_dmg" -nobrowse -mountpoint "$attach_dir"
+cleanup_attach() {
+  hdiutil detach "$attach_dir" -force >/dev/null 2>&1 || true
+}
+trap cleanup_attach EXIT
+ditto "${dmg_root}/${binary_name}" "${attach_dir}/${binary_name}"
+cleanup_attach
+trap - EXIT
+
+hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -ov -o "$tmp_dmg"
+rm -f "$rw_dmg"
+rm -rf "$dmg_root"
 
 sign "$tmp_dmg" --timestamp
 codesign --verify --strict --verbose=2 "$tmp_dmg"

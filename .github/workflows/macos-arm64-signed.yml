@@ -209,6 +209,13 @@ jobs:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
 
+      # Keep node_modules/dist (electron-builder needs them); only drop caches.
+      - name: Free runner caches before packaging
+        env:
+          FREE_PACKAGING_KEEP_NODE_MODULES: "true"
+          FREE_PACKAGING_KEEP_DIST: "true"
+        run: ./.github/scripts/macos-signing/free_packaging_space.sh
+
       - name: Package signed desktop DMG
         # electron-builder notarize:true staples the .app; outer DMG stapled next.
         run: npx electron-builder --mac dmg --arm64 --publish never --config electron-builder.config.ts
