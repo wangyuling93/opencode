@@ -1,8 +1,17 @@
 import { expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
-import type { TerminalColors } from "@opentui/core"
-import { DEFAULT_THEMES, addTheme, allThemes, hasTheme, resolveTheme, terminalMode } from "../src/theme"
+import { RGBA, type TerminalColors } from "@opentui/core"
+import {
+  DEFAULT_THEMES,
+  addTheme,
+  allThemes,
+  applyUiTransparency,
+  hasTheme,
+  resolveTheme,
+  selectedForeground,
+  terminalMode,
+} from "../src/theme"
 import { discoverThemes } from "../src/context/theme"
 import { tmpdir } from "./fixture/fixture"
 
@@ -42,6 +51,58 @@ test("resolveTheme rejects circular color refs", () => {
   item.defs = { ...item.defs, one: "two", two: "one" }
   item.theme.primary = "one"
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
+})
+
+test("applyUiTransparency clears root fills and keeps elevated plates", () => {
+  const base = resolveTheme(DEFAULT_THEMES.opencode, "dark")
+  expect(base.background.a).toBeGreaterThan(0)
+  expect(base.backgroundPanel.a).toBeGreaterThan(0)
+  expect(base.dialogBackdrop.a).toBeGreaterThan(0)
+  expect(base.overlayScrim.a).toBeGreaterThan(0)
+
+  const next = applyUiTransparency(base)
+  expect(next.background.a).toBe(0)
+  // Elevated surfaces stay opaque so dialogs/toasts remain readable.
+  expect(next.backgroundPanel.a).toBe(base.backgroundPanel.a)
+  expect(next.backgroundElement.a).toBe(base.backgroundElement.a)
+  expect(next.backgroundMenu.a).toBe(base.backgroundMenu.a)
+  expect(next.markdownCodeBlock.a).toBe(0)
+  expect(next.diffAddedBg.a).toBe(0)
+  expect(next.text.a).toBe(base.text.a)
+  expect(next.primary.a).toBe(base.primary.a)
+  expect(next.text.r).toBe(base.text.r)
+  expect(next.selectedListItemText.a).toBeGreaterThan(0)
+  // Softened scrims live in theme tokens (not view-level transparent() branches).
+  expect(next.dialogBackdrop.a).toBeLessThan(base.dialogBackdrop.a)
+  expect(next.overlayScrim.a).toBeLessThan(base.overlayScrim.a)
+  expect(next.dialogBackdrop.a).toBeGreaterThan(0)
+  expect(next.overlayScrim.a).toBeGreaterThan(0)
+})
+
+test("applyUiTransparency repairs explicit transparent selectedListItemText", () => {
+  const item = structuredClone(DEFAULT_THEMES.opencode)
+  item.theme.selectedListItemText = "transparent"
+  const base = resolveTheme(item, "dark")
+  expect(base.selectedListItemText.a).toBe(0)
+  expect(base._hasSelectedListItemText).toBe(true)
+
+  const next = applyUiTransparency(base)
+  expect(next.selectedListItemText.a).toBeGreaterThan(0)
+  expect(selectedForeground(next).a).toBe(next.selectedListItemText.a)
+  expect(selectedForeground(next).r).toBe(next.selectedListItemText.r)
+})
+
+test("selectedForeground contrasts against provided surfaces under transparency", () => {
+  const next = applyUiTransparency(resolveTheme(DEFAULT_THEMES.opencode, "dark"))
+  const darkSurface = RGBA.fromInts(20, 20, 20)
+  const lightSurface = RGBA.fromInts(240, 240, 240)
+
+  const onDark = selectedForeground(next, darkSurface)
+  const onLight = selectedForeground(next, lightSurface)
+  // Light text on dark surface, dark text on light surface.
+  expect(onDark.r + onDark.g + onDark.b).toBeGreaterThan(onLight.r + onLight.g + onLight.b)
+  expect(onDark.a).toBeGreaterThan(0)
+  expect(onLight.a).toBeGreaterThan(0)
 })
 
 function terminalColors(defaultBackground: string | null, palette: Array<string | null> = []): TerminalColors {

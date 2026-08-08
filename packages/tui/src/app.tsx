@@ -123,6 +123,7 @@ const appBindingCommands = [
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
+  "theme.transparent.toggle",
   "help.show",
   "docs.open",
   "diff.open",
@@ -376,7 +377,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const sdk = useSDK()
   const toast = useToast()
   const themeState = useTheme()
-  const { theme, mode, setMode, locked, lock, unlock } = themeState
+  const { theme, mode, setMode, locked, lock, unlock, transparent, toggleTransparent } = themeState
   const sync = useSync()
   const project = useProject()
   const exit = useExit()
@@ -802,6 +803,23 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         run: () => {
           if (locked()) unlock()
           else lock()
+          dialog.clear()
+        },
+        category: "System",
+      },
+      {
+        name: "theme.transparent.toggle",
+        title: transparent() ? "Disable transparent UI" : "Enable transparent UI",
+        slashName: "transparent",
+        slashAliases: ["transparency", "toggle-transparent"],
+        run: () => {
+          const next = toggleTransparent()
+          toast.show({
+            variant: "info",
+            message: next
+              ? "Transparent UI on — terminal wallpaper can show through"
+              : "Transparent UI off",
+          })
           dialog.clear()
         },
         category: "System",

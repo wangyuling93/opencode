@@ -1349,7 +1349,7 @@ export function Session() {
                   right={0}
                   bottom={0}
                   alignItems="flex-end"
-                  backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
+                  backgroundColor={theme.overlayScrim}
                 >
                   <Sidebar sessionID={route.sessionID} />
                 </box>
@@ -1425,7 +1425,7 @@ function UserMessage(props: {
                     const directory = file.mime === "application/x-directory"
                     return (
                       <text fg={theme.text}>
-                        <span style={{ bg: theme.secondary, fg: theme.background }}>
+                        <span style={{ bg: theme.secondary, fg: theme.selectedListItemText }}>
                           {directory ? " Directory " : " File "}
                         </span>
                         <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>

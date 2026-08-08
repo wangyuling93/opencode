@@ -9,6 +9,7 @@ import {
   generateSystem,
   hasTheme,
   isTheme,
+  applyUiTransparency,
   resolveTheme,
   selectedForeground,
   setCustomThemes,
@@ -64,6 +65,7 @@ export {
   DEFAULT_THEMES,
   addTheme,
   allThemes,
+  applyUiTransparency,
   generateSubtleSyntax,
   generateSyntax,
   generateSystem,
@@ -253,7 +255,9 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       themeRefreshTimeouts.length = 0
     })
 
-    const values = createMemo(() => {
+    const [transparent, setTransparent] = kv.signal("ui_transparent", false)
+
+    function resolveActiveTheme() {
       const active = store.themes[store.active]
       if (active) return resolveTheme(active, store.mode)
 
@@ -264,6 +268,11 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       }
 
       return resolveTheme(store.themes.opencode, store.mode)
+    }
+
+    const values = createMemo(() => {
+      const base = resolveActiveTheme()
+      return transparent() ? applyUiTransparency(base) : base
     })
 
     createEffect(() => renderer.setBackgroundColor(values().background))
@@ -290,6 +299,15 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       lock: () => pin(store.mode),
       unlock: free,
       setMode: pin,
+      transparent: () => Boolean(transparent()),
+      setTransparent(value: boolean) {
+        setTransparent(value)
+      },
+      toggleTransparent() {
+        const next = !Boolean(transparent())
+        setTransparent(next)
+        return next
+      },
       set(theme: string) {
         if (!hasTheme(theme)) return false
         setStore("active", theme)

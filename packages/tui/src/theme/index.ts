@@ -48,6 +48,10 @@ export type Theme = {
   readonly backgroundPanel: RGBA
   readonly backgroundElement: RGBA
   readonly backgroundMenu: RGBA
+  /** Full-screen modal dimmer (dialogs, command palette shell). */
+  readonly dialogBackdrop: RGBA
+  /** Side overlay scrim (e.g. narrow-layout session sidebar). */
+  readonly overlayScrim: RGBA
   readonly border: RGBA
   readonly borderActive: RGBA
   readonly borderSubtle: RGBA
@@ -92,22 +96,71 @@ export type Theme = {
 type ThemeColor = Exclude<keyof Theme, "thinkingOpacity" | "_hasSelectedListItemText">
 export type SyntaxStyleOverrides = Record<string, { italic?: boolean }>
 
+function contrastOn(bg: RGBA): RGBA {
+  const { r, g, b } = bg
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b
+  return luminance > 0.5 ? RGBA.fromInts(0, 0, 0) : RGBA.fromInts(255, 255, 255)
+}
+
 export function selectedForeground(theme: Theme, bg?: RGBA): RGBA {
+  // Per-surface contrast when the page canvas is transparent. Must run before the
+  // selectedListItemText early-return so chips/badges keep correct fg on non-primary fills.
+  if (theme.background.a === 0 && bg) return contrastOn(bg)
+
   // If theme explicitly defines selectedListItemText, use it
   if (theme._hasSelectedListItemText) {
     return theme.selectedListItemText
   }
 
-  // For transparent backgrounds, calculate contrast based on the actual bg (or fallback to primary)
+  // For transparent backgrounds without an explicit surface, contrast against primary
   if (theme.background.a === 0) {
-    const targetColor = bg ?? theme.primary
-    const { r, g, b } = targetColor
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b
-    return luminance > 0.5 ? RGBA.fromInts(0, 0, 0) : RGBA.fromInts(255, 255, 255)
+    return contrastOn(bg ?? theme.primary)
   }
 
   // Fall back to background color
   return theme.background
+}
+
+function clearAlpha(color: RGBA) {
+  return RGBA.fromValues(color.r, color.g, color.b, 0)
+}
+
+const DEFAULT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 150)
+const DEFAULT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 70)
+const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 60)
+const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 40)
+
+/**
+ * Two-tier transparent UI:
+ * - Root canvas + large content fills go fully clear so the terminal wallpaper shows through.
+ * - Elevated surfaces (panels/menus/elements) stay opaque so dialogs, toasts, and menus remain readable.
+ * - Overlay scrims get softer alpha; selection text keeps per-surface contrast via selectedForeground(bg).
+ */
+export function applyUiTransparency(theme: Theme): Theme {
+  const background = clearAlpha(theme.background)
+
+  // Only rewrite selectedListItemText when it would be invisible; keep author-defined opaque tokens.
+  const selectedListItemText =
+    theme.selectedListItemText.a === 0
+      ? contrastOn(theme.primary)
+      : theme.selectedListItemText
+
+  return {
+    ...theme,
+    background,
+    // Large content fills cleared for wallpaper.
+    markdownCodeBlock: clearAlpha(theme.markdownCodeBlock),
+    diffAddedBg: clearAlpha(theme.diffAddedBg),
+    diffRemovedBg: clearAlpha(theme.diffRemovedBg),
+    diffContextBg: clearAlpha(theme.diffContextBg),
+    diffAddedLineNumberBg: clearAlpha(theme.diffAddedLineNumberBg),
+    diffRemovedLineNumberBg: clearAlpha(theme.diffRemovedLineNumberBg),
+    // Elevated plates (backgroundPanel / Element / Menu) intentionally left opaque via ...theme.
+    selectedListItemText,
+    _hasSelectedListItemText: theme.selectedListItemText.a === 0 ? true : theme._hasSelectedListItemText,
+    dialogBackdrop: TRANSPARENT_DIALOG_BACKDROP,
+    overlayScrim: TRANSPARENT_OVERLAY_SCRIM,
+  }
 }
 
 type HexColor = `#${string}`
@@ -120,9 +173,14 @@ type ColorValue = HexColor | RefName | Variant | RGBA
 export type ThemeJson = {
   $schema?: string
   defs?: Record<string, HexColor | RefName>
-  theme: Omit<Record<ThemeColor, ColorValue>, "selectedListItemText" | "backgroundMenu"> & {
+  theme: Omit<
+    Record<ThemeColor, ColorValue>,
+    "selectedListItemText" | "backgroundMenu" | "dialogBackdrop" | "overlayScrim"
+  > & {
     selectedListItemText?: ColorValue
     backgroundMenu?: ColorValue
+    dialogBackdrop?: ColorValue
+    overlayScrim?: ColorValue
     thinkingOpacity?: number
   }
 }
@@ -265,7 +323,14 @@ export function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
 
   const resolved = Object.fromEntries(
     Object.entries(theme.theme)
-      .filter(([key]) => key !== "selectedListItemText" && key !== "backgroundMenu" && key !== "thinkingOpacity")
+      .filter(
+        ([key]) =>
+          key !== "selectedListItemText" &&
+          key !== "backgroundMenu" &&
+          key !== "dialogBackdrop" &&
+          key !== "overlayScrim" &&
+          key !== "thinkingOpacity",
+      )
       .map(([key, value]) => {
         return [key, resolveColor(value as ColorValue)]
       }),
@@ -287,6 +352,13 @@ export function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
   } else {
     resolved.backgroundMenu = resolved.backgroundElement
   }
+
+  resolved.dialogBackdrop =
+    theme.theme.dialogBackdrop !== undefined
+      ? resolveColor(theme.theme.dialogBackdrop)
+      : DEFAULT_DIALOG_BACKDROP
+  resolved.overlayScrim =
+    theme.theme.overlayScrim !== undefined ? resolveColor(theme.theme.overlayScrim) : DEFAULT_OVERLAY_SCRIM
 
   // Handle thinkingOpacity - optional with default of 0.6
   const thinkingOpacity = theme.theme.thinkingOpacity ?? 0.6
