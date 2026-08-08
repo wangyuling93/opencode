@@ -1,9 +1,15 @@
 # Fork-local Apple Silicon release: signed/notarized/stapled macOS arm64 DMG
-# of opencode2 built from THIS monorepo so fork TUI features ship (e.g. /transparent).
+# of opencode2 with FULL TUI + fork /transparent.
 #
-# Default: build packages/cli from the checkout (includes workspace @opencode-ai/tui).
-# Optional: source=npm packages the official @opencode-ai/cli-darwin-arm64 binary
-#           (matches bun i -g @opencode-ai/cli@next, but WITHOUT fork TUI patches).
+# Why packages/opencode (not packages/cli)?
+#   packages/cli on this monorepo tip is a thin V2 stub (api/debug/migrate/service/serve
+#   only). Building it produced ~98MB incomplete binaries that could not match
+#   bun i -g @opencode-ai/cli@next (full auth/mcp/acp/run/… surface + working TUI).
+#   packages/opencode is the full product: complete CLI, and it launches the
+#   workspace @opencode-ai/tui (so /transparent ships).
+#
+# Default: build packages/opencode from this checkout, package binary as opencode2.
+# Optional: source=npm signs official @opencode-ai/cli-darwin-arm64 (no /transparent).
 #
 # UX: Actions → macos-arm64-opencode2-cli → Run workflow (defaults are enough)
 #
@@ -22,9 +28,8 @@ on:
         default: true
       source:
         description: >-
-          Binary source. "repo" builds packages/cli from this checkout (includes
-          /transparent and other fork TUI work). "npm" signs official next only
-          (no fork TUI features).
+          Binary source. "repo" builds packages/opencode from this checkout
+          (full TUI + /transparent). "npm" signs official next only (no fork TUI).
         required: false
         type: choice
         options:
@@ -60,7 +65,12 @@ on:
         description: Repo builds only — linked sourcemaps (larger binary)
         required: false
         type: boolean
-        default: true
+        default: false
+      skip_embed_web_ui:
+        description: Repo builds only — skip embedding the web UI (faster, smaller)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -123,10 +133,10 @@ jobs:
             fi
             version_source="npm ${npm_spec}"
           else
-            # Repo build: preview version tied to channel + UTC stamp (matches packages/script style)
+            # Repo build: preview version tied to channel + UTC stamp
             stamp="$(date -u +%Y%m%d%H%M)"
             release_version="0.0.0-${cli_channel}-${stamp}"
-            version_source="repo packages/cli + packages/tui"
+            version_source="repo packages/opencode + packages/tui"
           fi
 
           release_tag="macos-arm64-opencode2-v${release_version}-${short_sha}"
@@ -195,9 +205,11 @@ jobs:
           lipo "${RUNNER_TEMP}/opencode2" -verify_arch arm64
           echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
 
-      # ── repo: monorepo build (includes /transparent from packages/tui) ──────
+      # ── repo: full packages/opencode + workspace packages/tui (/transparent) ─
       - uses: ./.github/actions/setup-bun
         if: needs.resolve-version.outputs.source == 'repo'
+        with:
+          install-flags: --os=darwin --cpu=arm64
 
       - name: Assert /transparent is present in this checkout
         if: needs.resolve-version.outputs.source == 'repo'
@@ -208,40 +220,44 @@ jobs:
           # Use grep (not rg): macOS GitHub-hosted runners do not ship ripgrep.
           grep -nF 'slashName: "transparent"' packages/tui/src/app.tsx
           grep -nF 'export function applyUiTransparency' packages/tui/src/theme/index.ts
-          echo "transparent feature markers found in packages/tui"
+          # packages/opencode must launch workspace TUI (where /transparent lives).
+          grep -nF 'from "@opencode-ai/tui"' packages/opencode/src/cli/tui/layer.ts
+          echo "transparent feature markers found (packages/tui + opencode layer)"
 
-      - name: Build opencode2 from monorepo
+      - name: Build full CLI from packages/opencode
         if: needs.resolve-version.outputs.source == 'repo'
         id: stage_repo
         shell: bash
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
-          OPENCODE_CLI_BINARY: opencode2
         run: |
           set -euo pipefail
           args=(--single)
           if [[ "${{ inputs.sourcemaps }}" == "true" ]]; then
             args+=(--sourcemaps)
           fi
-          # Full monorepo install already done by setup-bun (no os/cpu filter).
-          ./packages/cli/script/build.ts "${args[@]}"
-          binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
-          if [[ ! -f "$binary" ]]; then
-            echo "Missing $binary" >&2
-            ls -lahR packages/cli/dist || true
+          if [[ "${{ inputs.skip_embed_web_ui }}" == "true" ]]; then
+            args+=(--skip-embed-web-ui)
+          fi
+          # Full product CLI. packages/cli on this tip is a thin V2 stub and is NOT used.
+          ./packages/opencode/script/build.ts "${args[@]}"
+          built="packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
+          if [[ ! -f "$built" ]]; then
+            echo "Missing $built" >&2
+            ls -lahR packages/opencode/dist || true
             exit 1
           fi
           # Compile embeds workspace @opencode-ai/tui — verify transparent strings ship.
-          # Use grep -a on the binary. Do NOT pipe strings|grep under pipefail:
-          # grep -q exits early → SIGPIPE → strings exit 141 → false "missing markers".
-          if ! grep -aEq 'ui_transparent|applyUiTransparency|Enable transparent UI' "$binary"; then
+          # grep -a on the binary (not strings|grep under pipefail — SIGPIPE false negatives).
+          if ! grep -aEq 'ui_transparent|Enable transparent UI|toggle-transparent' "$built"; then
             echo "Built binary does not contain transparent UI markers" >&2
-            ls -lah "$binary" >&2
+            ls -lah "$built" >&2
             exit 1
           fi
           echo "transparent UI markers present in built binary"
-          install -m 0755 "$binary" "${RUNNER_TEMP}/opencode2"
+          # Package as opencode2 so it can sit alongside official `opencode`.
+          install -m 0755 "$built" "${RUNNER_TEMP}/opencode2"
           ls -lah "${RUNNER_TEMP}/opencode2"
           echo "path=${RUNNER_TEMP}/opencode2" >>"$GITHUB_OUTPUT"
 
@@ -264,14 +280,25 @@ jobs:
             || { echo "Expected --version to contain ${RELEASE_VERSION}, got: ${version_output}" >&2; exit 1; }
           bytes="$(wc -c <"$binary" | tr -d ' ')"
           echo "binary_bytes=${bytes}"
+          help_output="$("$binary" --help 2>&1 || true)"
+          echo "$help_output" | head -80
           if [[ "$SOURCE" == "repo" ]]; then
-            # Repo builds must keep the fork TUI command surface.
-            # grep -a (not strings|grep): avoids pipefail/SIGPIPE false negatives on large binaries.
+            # Full CLI surface (not the packages/cli V2 stub which only has api/debug/migrate/service/serve).
+            for needle in mcp models acp run; do
+              if ! grep -Fq "$needle" <<<"$help_output"; then
+                echo "Repo build help missing full CLI surface marker: ${needle}" >&2
+                echo "$help_output" >&2
+                exit 1
+              fi
+            done
+            echo "full CLI help surface present (mcp/models/acp/run)"
+            # Fork TUI command surface.
             if ! grep -aEq 'Enable transparent UI|ui_transparent|toggle-transparent' "$binary"; then
               echo "Repo build missing /transparent command markers" >&2
               exit 1
             fi
             echo "transparent command markers present in binary"
+            # packages/cli V2 stub help only has api/debug/migrate/service/serve — already rejected above.
           fi
 
       - name: Sign, notarize, and staple opencode2 DMG
@@ -348,8 +375,9 @@ jobs:
             echo "Source: \`${{ needs.resolve-version.outputs.source }}\`"
             if [[ "${{ needs.resolve-version.outputs.source }}" == "repo" ]]; then
               echo
-              echo "Built from this monorepo (\`packages/cli\` + workspace \`packages/tui\`)."
-              echo "Includes fork TUI features such as \`/transparent\`."
+              echo "Built from this monorepo (\`packages/opencode\` + workspace \`packages/tui\`)."
+              echo "Full CLI surface (mcp/models/acp/run/…) plus fork TUI feature \`/transparent\`."
+              echo "Binary is named \`opencode2\` (full product packaged for side-by-side install)."
               echo "Channel: \`${{ needs.resolve-version.outputs.cli_channel }}\`"
             else
               echo
