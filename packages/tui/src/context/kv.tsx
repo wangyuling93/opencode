@@ -1,4 +1,4 @@
-import { createSignal, type Setter } from "solid-js"
+import { createSignal } from "solid-js"
 import { createStore, unwrap } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { Flock } from "@opencode-ai/core/util/flock"
@@ -41,10 +41,12 @@ export const { use: useKV, provider: KVProvider } = createSimpleContext({
         if (store[name] === undefined) setStore(name, defaultValue)
         return [
           function () {
-            return result.get(name)
+            return result.get(name, defaultValue) as T
           },
-          function setter(next: Setter<T>) {
-            result.set(name, next)
+          // Solid Setter shape: accept a value or an updater fn.
+          function setter(next: T | ((prev: T) => T)) {
+            const prev = result.get(name, defaultValue) as T
+            result.set(name, typeof next === "function" ? (next as (value: T) => T)(prev) : next)
           },
         ] as const
       },
