@@ -132,11 +132,11 @@ const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 40)
 
 /**
  * Transparent UI:
- * - Root canvas, prompt chrome, slash/autocomplete menus, and large content fills go fully clear
- *   so the terminal wallpaper shows through (prompt uses backgroundElement; slash list uses
- *   backgroundMenu — both already handle alpha=0 borders in component code).
- * - Modal dialog plates (backgroundPanel) stay opaque so dialogs/toasts remain readable.
- * - Overlay scrims get softer alpha; selection text keeps per-surface contrast via selectedForeground(bg).
+ * - All solid plates go fully clear so the terminal wallpaper shows through:
+ *   root canvas, prompt (backgroundElement), slash/autocomplete (backgroundMenu),
+ *   and dialog/status/toast shells (backgroundPanel — e.g. /status).
+ * - Soft dialogBackdrop / overlayScrim remain slightly tinted for focus, not solid fills.
+ * - Selection text keeps per-surface contrast via selectedForeground(bg).
  */
 export function applyUiTransparency(theme: Theme): Theme {
   const background = clearAlpha(theme.background)
@@ -154,6 +154,8 @@ export function applyUiTransparency(theme: Theme): Theme {
     backgroundElement: clearAlpha(theme.backgroundElement),
     // Slash command / autocomplete popup list.
     backgroundMenu: clearAlpha(theme.backgroundMenu),
+    // Dialogs (/status, command palette, etc.), toasts, session side panels.
+    backgroundPanel: clearAlpha(theme.backgroundPanel),
     // Large content fills cleared for wallpaper.
     markdownCodeBlock: clearAlpha(theme.markdownCodeBlock),
     diffAddedBg: clearAlpha(theme.diffAddedBg),
@@ -161,7 +163,6 @@ export function applyUiTransparency(theme: Theme): Theme {
     diffContextBg: clearAlpha(theme.diffContextBg),
     diffAddedLineNumberBg: clearAlpha(theme.diffAddedLineNumberBg),
     diffRemovedLineNumberBg: clearAlpha(theme.diffRemovedLineNumberBg),
-    // Modal dialog plate (backgroundPanel) stays opaque via ...theme.
     selectedListItemText,
     _hasSelectedListItemText: theme.selectedListItemText.a === 0 ? true : theme._hasSelectedListItemText,
     dialogBackdrop: TRANSPARENT_DIALOG_BACKDROP,

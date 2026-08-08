@@ -53,7 +53,7 @@ test("resolveTheme rejects circular color refs", () => {
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
 })
 
-test("applyUiTransparency clears root fills, prompt, and slash menu; keeps dialog plate", () => {
+test("applyUiTransparency clears root fills, prompt, slash menu, and dialog plates", () => {
   const base = resolveTheme(DEFAULT_THEMES.opencode, "dark")
   expect(base.background.a).toBeGreaterThan(0)
   expect(base.backgroundPanel.a).toBeGreaterThan(0)
@@ -64,11 +64,10 @@ test("applyUiTransparency clears root fills, prompt, and slash menu; keeps dialo
 
   const next = applyUiTransparency(base)
   expect(next.background.a).toBe(0)
-  // Prompt chrome + slash/autocomplete list go clear for wallpaper.
+  // Prompt, slash/autocomplete, and dialog/status plates all clear for wallpaper.
   expect(next.backgroundElement.a).toBe(0)
   expect(next.backgroundMenu.a).toBe(0)
-  // Modal dialog plate stays opaque so dialogs remain readable.
-  expect(next.backgroundPanel.a).toBe(base.backgroundPanel.a)
+  expect(next.backgroundPanel.a).toBe(0)
   expect(next.markdownCodeBlock.a).toBe(0)
   expect(next.diffAddedBg.a).toBe(0)
   expect(next.text.a).toBe(base.text.a)
