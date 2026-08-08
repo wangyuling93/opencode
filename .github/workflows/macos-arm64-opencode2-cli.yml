@@ -205,8 +205,9 @@ jobs:
         run: |
           set -euo pipefail
           # Fail the release if fork TUI work is missing from the branch we built.
-          rg -n 'slashName: "transparent"' packages/tui/src/app.tsx
-          rg -n 'export function applyUiTransparency' packages/tui/src/theme/index.ts
+          # Use grep (not rg): macOS GitHub-hosted runners do not ship ripgrep.
+          grep -nF 'slashName: "transparent"' packages/tui/src/app.tsx
+          grep -nF 'export function applyUiTransparency' packages/tui/src/theme/index.ts
           echo "transparent feature markers found in packages/tui"
 
       - name: Build opencode2 from monorepo
@@ -232,7 +233,8 @@ jobs:
             exit 1
           fi
           # Compile embeds workspace @opencode-ai/tui — verify transparent strings ship.
-          if ! strings "$binary" | rg -q 'transparent|ui_transparent|applyUiTransparency|Enable transparent UI'; then
+          # grep -E only: rg is not installed on macOS-hosted runners.
+          if ! strings "$binary" | grep -Eq 'transparent|ui_transparent|applyUiTransparency|Enable transparent UI'; then
             echo "Built binary does not contain transparent UI markers" >&2
             exit 1
           fi
@@ -261,7 +263,7 @@ jobs:
           echo "binary_bytes=${bytes}"
           if [[ "$SOURCE" == "repo" ]]; then
             # Repo builds must keep the fork TUI command surface.
-            if ! strings "$binary" | rg -q 'Enable transparent UI|/transparent|ui_transparent'; then
+            if ! strings "$binary" | grep -Eq 'Enable transparent UI|/transparent|ui_transparent'; then
               echo "Repo build missing /transparent command markers" >&2
               exit 1
             fi
