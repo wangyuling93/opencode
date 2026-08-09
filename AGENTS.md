@@ -3,6 +3,36 @@
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
+- Prefer a single working branch (`dev` on this fork). Do not keep parallel long-lived fork branches that only dual-track the same commits unless there is a clear split of purpose.
+
+## CLI products: `opencode` vs `opencode2`
+
+These are different **packages**, not different long-lived product branches.
+
+| Product | Source package | Binary / npm (typical) | Notes |
+|---------|----------------|------------------------|--------|
+| Classic OpenCode | `packages/opencode` | binary `opencode`, npm `opencode-ai` | Full yargs CLI surface |
+| OpenCode 2.0 CLI | `packages/cli` | binary `opencode2` when `OPENCODE_CLI_BINARY=opencode2` (default build name may be `lildax`); npm `@opencode-ai/cli` | Effect CLI; **default (no args) opens TUI** via `@opencode-ai/tui` |
+
+- **Never** ship “opencode2” by building `packages/opencode` and renaming the binary. That is classic product under a wrong name.
+- Real opencode2 = `packages/cli` + workspace `packages/tui` (fork TUI patches such as `/transparent` live in `packages/tui` and ship when the CLI default handler embeds TUI).
+- Upstream monorepo tip `packages/cli` may be a **thin** command surface (e.g. api/debug/migrate/service/serve). npm `@opencode-ai/cli@next` can be a **richer older snapshot** (auth/mcp/acp/run/…). Do not assume tip help matches an installed `@next` binary.
+- OpenCode Go / provider connect is TUI **`/connect`** (`provider.connect` → `opencode-go`), not a fat CLI subcommand on the thin tip. Thin CLI + TUI is enough for Go connect.
+
+## Signed macOS arm64 opencode2 workflow
+
+- Workflow: `.github/workflows/macos-arm64-opencode2-cli.yml` (fork only; skips `anomalyco/opencode`).
+- Default `source=repo`: build `./packages/cli/script/build.ts --single` with `OPENCODE_CLI_BINARY=opencode2`, assert transparent markers in binary, sign/notarize DMG.
+- `source=npm`: stage official `@opencode-ai/cli-darwin-arm64@…` (no fork TUI patches).
+- `sourcemaps` still applies to `packages/cli`. `skip_embed_web_ui` does not (classic-only leftover; ignore for cli builds).
+- Run from **`dev`**. Push commits that should appear in the Action to the branch you dispatch on.
+
+## TUI: transparent overlays and selection
+
+- Under `/transparent`, themed plate colors are alpha-0 and do not clear glyphs. Content-sized overlays (dialog, toast, prompt plate) must use `overlayPlate(panel, transparent)` from `packages/tui/src/theme` so the rect paints terminal-default and stays readable.
+- Full-screen dimmers (`dialogBackdrop`, etc.) stay clear so wallpaper/main UI outside the overlay is not wiped.
+- Copy-on-select mouse-up should keep the highlight: `Selection.copy(..., { keep: true })` from `packages/tui/src/util/selection`. Explicit copy may clear. Do not reimplement copy in dialog/app.
+- Toast chrome: all toasts share one `Toast()` component; use `ThickOutline` (heavy `┃`/`━` box) with variant `borderColor` and `overlayPlate` fill—not only left/right split bars unless product asks for that again.
 
 ## Branch Names
 

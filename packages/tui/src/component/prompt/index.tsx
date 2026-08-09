@@ -1358,7 +1358,8 @@ export function Prompt(props: PromptProps) {
           backgroundColor={plate()}
           paddingLeft={1}
           paddingRight={1}
-          paddingTop={1}
+          paddingTop={0}
+          paddingBottom={0}
         >
           <textarea
             width="100%"
