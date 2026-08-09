@@ -1118,7 +1118,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       }}
       onMouseUp={
         !Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT
-          ? () => Selection.copy(renderer, toast, clipboard)
+          ? () => Selection.copy(renderer, toast, clipboard, { keep: true })
           : undefined
       }
     >

@@ -1,6 +1,6 @@
 import { createContext, useContext, type ParentProps, Show } from "solid-js"
 import { createStore } from "solid-js/store"
-import { useTheme } from "../context/theme"
+import { overlayPlate, useTheme } from "../context/theme"
 import { useTerminalDimensions } from "@opentui/solid"
 import { SplitBorder } from "./border"
 import { TextAttributes } from "@opentui/core"
@@ -14,14 +14,16 @@ type ToastInput = Omit<ToastOptions, "duration"> & { duration?: number }
 
 export function Toast() {
   const toast = useToast()
-  const { theme } = useTheme()
+  const { theme, transparent } = useTheme()
   const dimensions = useTerminalDimensions()
+  const plate = () => overlayPlate(theme.backgroundPanel, transparent())
 
   return (
     <Show when={toast.currentToast}>
       {(current) => (
         <box
           position="absolute"
+          zIndex={2500}
           justifyContent="center"
           alignItems="flex-start"
           top={2}
@@ -31,7 +33,7 @@ export function Toast() {
           paddingRight={2}
           paddingTop={1}
           paddingBottom={1}
-          backgroundColor={theme.backgroundPanel}
+          backgroundColor={plate()}
           borderColor={theme[current().variant]}
           border={["left", "right"]}
           customBorderChars={SplitBorder.customBorderChars}

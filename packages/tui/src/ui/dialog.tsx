@@ -1,12 +1,13 @@
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
-import { useTheme } from "../context/theme"
-import { MouseButton, Renderable, RGBA } from "@opentui/core"
+import { overlayPlate, useTheme } from "../context/theme"
+import { MouseButton, Renderable } from "@opentui/core"
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { useBindings, useOpencodeModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
+import * as Selection from "../util/selection"
 
 export function Dialog(
   props: ParentProps<{
@@ -25,10 +26,8 @@ export function Dialog(
     return 60
   }
 
-  // Grok Build: Clear.render(modal_area) only — not the whole frame. Under /transparent,
-  // terminal-default fill clears glyphs inside the modal rect (wallpaper stays); alpha-0
-  // does not paint so main UI would bleed through the plate.
-  const plate = () => (transparent() ? RGBA.defaultBackground() : theme.backgroundPanel)
+  // Content-sized clear only (not full-frame dim). See overlayPlate.
+  const plate = () => overlayPlate(theme.backgroundPanel, transparent())
 
   return (
     <box
@@ -198,17 +197,6 @@ export function DialogProvider(props: ParentProps) {
   const toast = useToast()
   const clipboard = useClipboard()
 
-  function copySelection() {
-    const text = renderer.getSelection()?.getSelectedText()
-    if (!text || !clipboard.write) return false
-    void clipboard.write(text).then(
-      () => toast.show({ message: "Copied to clipboard", variant: "info" }),
-      (error) => toast.error(error),
-    )
-    renderer.clearSelection()
-    return true
-  }
-
   return (
     <ctx.Provider value={value}>
       {props.children}
@@ -219,11 +207,15 @@ export function DialogProvider(props: ParentProps) {
           if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
           if (evt.button !== MouseButton.RIGHT) return
 
-          if (!copySelection()) return
+          if (!Selection.copy(renderer, toast, clipboard)) return
           evt.preventDefault()
           evt.stopPropagation()
         }}
-        onMouseUp={!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT ? copySelection : undefined}
+        onMouseUp={
+          !Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT
+            ? () => Selection.copy(renderer, toast, clipboard, { keep: true })
+            : undefined
+        }
       >
         <Show when={value.stack.length}>
           <Dialog onClose={() => value.clear()} size={value.size}>

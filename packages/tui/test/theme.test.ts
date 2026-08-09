@@ -8,6 +8,7 @@ import {
   allThemes,
   applyUiTransparency,
   hasTheme,
+  overlayPlate,
   resolveTheme,
   selectedForeground,
   terminalMode,
@@ -78,6 +79,13 @@ test("applyUiTransparency clears root fills, prompt, slash menu, and dialog plat
   // Modal plate clear is content-sized in Dialog (defaultBackground), not here.
   expect(next.dialogBackdrop.a).toBe(0)
   expect(next.overlayScrim.a).toBe(0)
+})
+
+test("overlayPlate uses themed panel unless transparent, then terminal default clear", () => {
+  const panel = RGBA.fromInts(32, 32, 40, 255)
+  expect(overlayPlate(panel, false)).toBe(panel)
+  const clear = overlayPlate(panel, true)
+  expect(clear.equals(RGBA.defaultBackground())).toBe(true)
 })
 
 test("applyUiTransparency repairs explicit transparent selectedListItemText", () => {

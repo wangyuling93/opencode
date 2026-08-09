@@ -134,6 +134,15 @@ const TRANSPARENT_DIALOG_BACKDROP = RGBA.fromInts(0, 0, 0, 0)
 const TRANSPARENT_OVERLAY_SCRIM = RGBA.fromInts(0, 0, 0, 0)
 
 /**
+ * Fill for content-sized overlays (modal, toast, prompt plate) under transparent UI.
+ * Terminal-default paint clears glyphs in the box only; alpha-0 would leave bleed-through.
+ * When not transparent, use the themed plate color as-is.
+ */
+export function overlayPlate(panel: RGBA, transparent: boolean) {
+  return transparent ? RGBA.defaultBackground() : panel
+}
+
+/**
  * Transparent UI:
  * - Root canvas, prompt, slash menus, and generic plates use alpha-0 so wallpaper shows.
  * - Full-screen dialogBackdrop/overlayScrim stay alpha-0 (do not wipe the whole UI).
