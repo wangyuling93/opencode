@@ -2,14 +2,16 @@
 # DMGs for desktop + CLI.
 #
 # UX: one manual click — Actions → macos-arm64-signed → Run workflow
+#     (uncheck "Build and release the desktop DMG" for CLI-only builds)
 #
 # Internal graph (parallel after resolve; free minutes on public repos favor
 # wall-clock over serializing on one runner):
 #
 #   resolve-version
 #     ├── package-cli      (build + sign + notarize CLI DMG)
-#     └── package-desktop  (build + sign + notarize desktop DMG)
-#              └── publish (optional; waits for both)
+#     └── package-desktop  (build + sign + notarize desktop DMG; skipped when
+#                           build_desktop=false)
+#              └── publish (optional; waits for both that run)
 #
 # codesigning environment (secrets/vars):
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
@@ -50,6 +52,11 @@ on:
           - beta
           - dev
         default: prod
+      build_desktop:
+        description: Build and release the desktop DMG too. Uncheck to build and release only the CLI DMG.
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -161,6 +168,7 @@ jobs:
 
   package-desktop:
     needs: resolve-version
+    if: github.repository != 'anomalyco/opencode' && inputs.build_desktop
     name: Desktop DMG
     runs-on: macos-26
     timeout-minutes: 180
@@ -266,7 +274,7 @@ jobs:
           retention-days: 7
 
   publish:
-    if: ${{ inputs.publish_github_release }}
+    if: ${{ !cancelled() && inputs.publish_github_release && needs.package-cli.result == 'success' && (needs.package-desktop.result == 'success' || needs.package-desktop.result == 'skipped') }}
     needs:
       - resolve-version
       - package-cli
@@ -288,6 +296,7 @@ jobs:
           path: release-assets
 
       - name: Download signed desktop DMG
+        if: inputs.build_desktop
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: macos-arm64-signed-desktop
@@ -297,17 +306,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in \
-            release-assets/opencode-cli-mac-arm64.dmg \
-            release-assets/opencode-desktop-mac-arm64.dmg
-          do
-            if [[ ! -f "$path" ]]; then
-              echo "Missing ${path}" >&2
+          if [[ ! -f "release-assets/opencode-cli-mac-arm64.dmg" ]]; then
+            echo "Missing release-assets/opencode-cli-mac-arm64.dmg" >&2
+            ls -lahR release-assets || true
+            exit 1
+          fi
+          if [[ "${{ inputs.build_desktop }}" == "true" ]]; then
+            if [[ ! -f "release-assets/opencode-desktop-mac-arm64.dmg" ]]; then
+              echo "Missing release-assets/opencode-desktop-mac-arm64.dmg" >&2
               ls -lahR release-assets || true
               exit 1
             fi
-          done
+          fi
           ls -lah release-assets/
+
+      - name: Compute release asset list
+        id: assets
+        shell: bash
+        run: |
+          {
+            echo "files<<EOF"
+            echo "release-assets/opencode-cli-mac-arm64.dmg"
+            if [[ "${{ inputs.build_desktop }}" == "true" ]]; then
+              echo "release-assets/opencode-desktop-mac-arm64.dmg"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Release notes
         id: notes
@@ -318,10 +342,16 @@ jobs:
           {
             echo "Signed, notarized, and stapled Apple Silicon (mac-arm64) builds."
             echo
-            echo "Assets (each hard-verified for codesign + staple before publish):"
+            if [[ "${{ inputs.build_desktop }}" == "true" ]]; then
+              echo "Assets (each hard-verified for codesign + staple before publish):"
+            else
+              echo "Asset (hard-verified for codesign + staple before publish):"
+            fi
             echo
-            echo "- \`opencode-desktop-mac-arm64.dmg\` — desktop app"
             echo "- \`opencode-cli-mac-arm64.dmg\` — terminal CLI (\`opencode\`)"
+            if [[ "${{ inputs.build_desktop }}" == "true" ]]; then
+              echo "- \`opencode-desktop-mac-arm64.dmg\` — desktop app"
+            fi
             echo
             echo "Channel: \`${{ needs.resolve-version.outputs.channel }}\`"
             echo
@@ -339,9 +369,7 @@ jobs:
           tag_name: ${{ needs.resolve-version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           body_path: ${{ steps.notes.outputs.path }}
-          files: |
-            release-assets/opencode-cli-mac-arm64.dmg
-            release-assets/opencode-desktop-mac-arm64.dmg
+          files: ${{ steps.assets.outputs.files }}
           overwrite_files: true
           fail_on_unmatched_files: true
           make_latest: false

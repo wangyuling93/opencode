@@ -19,12 +19,11 @@ These are different **packages**, not different long-lived product branches.
 - Upstream monorepo tip `packages/cli` may be a **thin** command surface (e.g. api/debug/migrate/service/serve). npm `@opencode-ai/cli@next` can be a **richer older snapshot** (auth/mcp/acp/run/…). Do not assume tip help matches an installed `@next` binary.
 - OpenCode Go / provider connect is TUI **`/connect`** (`provider.connect` → `opencode-go`), not a fat CLI subcommand on the thin tip. Thin CLI + TUI is enough for Go connect.
 
-## Signed macOS arm64 opencode2 workflow
+## Signed macOS arm64 release workflow
 
-- Workflow: `.github/workflows/macos-arm64-opencode2-cli.yml` (fork only; skips `anomalyco/opencode`).
-- Default `source=repo`: build `./packages/cli/script/build.ts --single` with `OPENCODE_CLI_BINARY=opencode2`, assert transparent markers in binary, sign/notarize DMG.
-- `source=npm`: stage official `@opencode-ai/cli-darwin-arm64@…` (no fork TUI patches).
-- `sourcemaps` still applies to `packages/cli`. `skip_embed_web_ui` does not (classic-only leftover; ignore for cli builds).
+- Workflow: `.github/workflows/macos-arm64-signed.yml` (fork only; skips `anomalyco/opencode`).
+- Builds the full-product CLI from `packages/opencode` (`./packages/opencode/script/build.ts --single`, darwin-arm64) — it launches the workspace `@opencode-ai/tui`, so fork `/transparent` ships — plus the desktop app via electron-builder.
+- Input `build_desktop` (default true): uncheck to build, sign, and release only the CLI DMG.
 - Run from **`dev`**. Push commits that should appear in the Action to the branch you dispatch on.
 
 ## TUI: transparent overlays and selection
