@@ -1,0 +1,54 @@
+name: macOS codesigning setup
+description: >
+  Fail-fast check of the codesigning environment, import Developer ID Application
+  cert into a temporary keychain, and optionally resolve SIGNING_IDENTITY.
+
+inputs:
+  apple-developer-id-p12:
+    description: Base64-encoded Developer ID Application .p12
+    required: true
+  apple-developer-id-p12-password:
+    description: Password for the .p12
+    required: true
+  apple-app-specific-password:
+    description: Apple app-specific password for notarytool
+    required: true
+  apple-id:
+    description: Apple Account email
+    required: true
+  apple-team-id:
+    description: Apple Developer Team ID (10 chars)
+    required: true
+  keychain:
+    description: Keychain name without .keychain suffix (apple-actions convention)
+    required: false
+    default: build
+  resolve-identity:
+    description: If true, set SIGNING_IDENTITY in GITHUB_ENV
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Require codesigning environment
+      shell: bash
+      env:
+        APPLE_DEVELOPER_ID_P12: ${{ inputs.apple-developer-id-p12 }}
+        APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ inputs.apple-developer-id-p12-password }}
+        APPLE_APP_SPECIFIC_PASSWORD: ${{ inputs.apple-app-specific-password }}
+        APPLE_ID: ${{ inputs.apple-id }}
+        APPLE_TEAM_ID: ${{ inputs.apple-team-id }}
+      run: ./.github/scripts/macos-signing/require_codesigning_env.sh
+
+    - name: Import Developer ID certificate
+      uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+      with:
+        keychain: ${{ inputs.keychain }}
+        p12-file-base64: ${{ inputs.apple-developer-id-p12 }}
+        p12-password: ${{ inputs.apple-developer-id-p12-password }}
+
+    - name: Resolve signing identity
+      if: inputs.resolve-identity == 'true'
+      shell: bash
+      run: ./.github/scripts/macos-signing/resolve_signing_identity.sh ${{ inputs.keychain }}.keychain
