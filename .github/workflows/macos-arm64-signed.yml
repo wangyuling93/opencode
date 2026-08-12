@@ -4,6 +4,10 @@
 # UX: one manual click — Actions → macos-arm64-signed → Run workflow
 #     (uncheck "Build and release the desktop DMG" for CLI-only builds)
 #
+# Channel (drives both desktop and CLI):
+#   prod  — dev branch, classic opencode CLI (packages/opencode)
+#   beta  — v2 branch, opencode2 CLI (packages/cli) + desktop
+#
 # Internal graph (parallel after resolve; free minutes on public repos favor
 # wall-clock over serializing on one runner):
 #
@@ -23,7 +27,7 @@
 #
 # Assets:
 #   opencode-desktop-mac-arm64.dmg
-#   opencode-cli-mac-arm64.dmg
+#   opencode-cli-mac-arm64.dmg (opencode on prod, opencode2 on beta)
 # Tag: macos-arm64-v{version}-{7-char commit sha}
 
 name: macos-arm64-signed
@@ -38,19 +42,20 @@ on:
         default: true
       release_version:
         description: >-
-          Version embedded in the binaries. Leave empty to use
-          packages/opencode/package.json (for example, 1.18.15).
+          Version embedded in the binaries. Leave empty to use the package
+          version (packages/opencode on prod, packages/desktop on beta).
         required: false
         type: string
         default: ""
       channel:
-        description: Desktop channel (prod, beta, or dev)
+        description: >-
+          Channel for both desktop and CLI. prod builds the dev branch;
+          beta builds the v2 branch (opencode2 CLI + desktop).
         required: false
         type: choice
         options:
           - prod
           - beta
-          - dev
         default: prod
       build_desktop:
         description: Build and release the desktop DMG too. Uncheck to build and release only the CLI DMG.
@@ -78,6 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
+          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
           persist-credentials: false
 
       - name: Resolve release version and tag
@@ -86,6 +92,9 @@ jobs:
         env:
           INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
           INPUT_CHANNEL: ${{ inputs.channel }}
+          # prod (dev branch) tracks the classic CLI version; beta (v2 branch)
+          # has no packages/opencode, so desktop tracks the release cadence.
+          PACKAGE_JSON: ${{ inputs.channel == 'beta' && 'packages/desktop/package.json' || 'packages/opencode/package.json' }}
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
@@ -103,6 +112,7 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
+          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
           persist-credentials: false
 
       - uses: ./.github/actions/macos-codesigning-setup
@@ -118,7 +128,9 @@ jobs:
           install-flags: --os=darwin --cpu=arm64
 
       - name: Build CLI (darwin-arm64)
-        run: ./packages/opencode/script/build.ts --single
+        # prod ships the classic packages/opencode CLI; beta ships opencode2
+        # from packages/cli on the v2 branch.
+        run: ${{ inputs.channel == 'beta' && 'bun ./packages/cli/script/build.ts --single' || './packages/opencode/script/build.ts --single' }}
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
@@ -127,19 +139,26 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
-          binary="packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
+          if [[ "${CHANNEL}" == "beta" ]]; then
+            binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
+            dist_dir="packages/cli/dist"
+          else
+            binary="packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
+            dist_dir="packages/opencode/dist"
+          fi
           if [[ ! -f "$binary" ]]; then
             echo "Missing CLI binary: $binary" >&2
-            ls -lahR packages/opencode/dist || true
+            ls -lahR "$dist_dir" || true
             exit 1
           fi
           chmod 0755 "$binary"
           version_output="$("$binary" --version)"
           echo "$version_output"
           [[ "$version_output" == *"${RELEASE_VERSION}"* ]] \
-            || { echo "Expected opencode --version to contain ${RELEASE_VERSION}" >&2; exit 1; }
+            || { echo "Expected CLI --version to contain ${RELEASE_VERSION}" >&2; exit 1; }
           lipo "$binary" -verify_arch arm64
 
       - name: Sign, notarize, and staple CLI DMG
@@ -147,6 +166,8 @@ jobs:
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          BINARY_PATH: ${{ inputs.channel == 'beta' && 'packages/cli/dist/cli-darwin-arm64/bin/opencode2' || 'packages/opencode/dist/opencode-darwin-arm64/bin/opencode' }}
+          BINARY_NAME: ${{ inputs.channel == 'beta' && 'opencode2' || 'opencode' }}
         run: ./.github/scripts/macos-signing/package_cli_dmg.sh
 
       - name: Upload signed CLI DMG
@@ -181,6 +202,7 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
+          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
           persist-credentials: false
 
       - uses: ./.github/actions/macos-codesigning-setup
@@ -287,6 +309,7 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
+          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
           persist-credentials: false
 
       - name: Download signed CLI DMG
@@ -336,6 +359,8 @@ jobs:
       - name: Release notes
         id: notes
         shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           notes_path="${RUNNER_TEMP}/release-notes.md"
@@ -348,7 +373,11 @@ jobs:
               echo "Asset (hard-verified for codesign + staple before publish):"
             fi
             echo
-            echo "- \`opencode-cli-mac-arm64.dmg\` — terminal CLI (\`opencode\`)"
+            if [[ "${CHANNEL}" == "beta" ]]; then
+              echo "- \`opencode-cli-mac-arm64.dmg\` — opencode2 terminal CLI (\`opencode2\`)"
+            else
+              echo "- \`opencode-cli-mac-arm64.dmg\` — terminal CLI (\`opencode\`)"
+            fi
             if [[ "${{ inputs.build_desktop }}" == "true" ]]; then
               echo "- \`opencode-desktop-mac-arm64.dmg\` — desktop app"
             fi
