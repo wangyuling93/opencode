@@ -8,6 +8,10 @@
 #   prod  — dev branch, classic opencode CLI (packages/opencode)
 #   beta  — v2 branch, opencode2 CLI (packages/cli) + desktop
 #
+# beta jobs check out ref v2, so local actions/scripts must exist there too:
+# .github/actions/macos-codesigning-setup and .github/scripts/macos-signing
+# are mirrored onto the v2 branch — keep them in sync when they change here.
+#
 # Internal graph (parallel after resolve; free minutes on public repos favor
 # wall-clock over serializing on one runner):
 #
