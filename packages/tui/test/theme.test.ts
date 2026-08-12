@@ -196,7 +196,7 @@ test("theme directories include global config before project directories", async
   })
 })
 
-test("applyUiTransparency clears root fills and keeps elevated plates", () => {
+test("applyUiTransparency clears root and contextual fills", () => {
   const resolved = resolveThemeDocument(parseTheme(DEFAULT_THEMES.opencode), "dark")
   expect(resolved.background.default.a).toBeGreaterThan(0)
   expect(resolved.background.surface.offset.a).toBeGreaterThan(0)
@@ -212,6 +212,13 @@ test("applyUiTransparency clears root fills and keeps elevated plates", () => {
   expect(next.diff.lineNumber.background.added.a).toBe(0)
   expect(next.diff.lineNumber.background.removed.a).toBe(0)
   expect(next.markdown.codeBlock.a).toBe(0)
+  // Elevated/overlay views resolve from user message plates and tab rails.
+  expect(next.contextual.elevated.background.default.a).toBe(0)
+  expect(next.contextual.elevated.background.surface.offset.a).toBe(0)
+  expect(next.contextual.overlay.background.default.a).toBe(0)
+  expect(next.contextual.overlay.background.surface.overlay.a).toBe(0)
+  expect(next.contextual.elevated.diff.background.added.a).toBe(0)
+  expect(next.contextual.overlay.markdown.codeBlock.a).toBe(0)
   // Text and borders stay intact.
   expect(next.text.default.r).toBe(resolved.text.default.r)
   expect(next.border.default.a).toBe(resolved.border.default.a)

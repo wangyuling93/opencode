@@ -95,7 +95,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
   const tabs = props.controller ?? useSessionTabs()
   const data = useData()
   const theme = useTheme("elevated")
-  const { mode } = useThemes()
+  const { mode, transparent } = useThemes()
   const config = useConfig().data
   const animations = () => props.animations ?? config.animations ?? true
   const width = () => SESSION_SIDEBAR_WIDTH
@@ -198,6 +198,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                 return Locale.takeWidth(projectName(project(), value?.location.directory) ?? "", titleWidth())
               })
               const background = createMemo(() => {
+                if (transparent()) return RGBA.fromInts(0, 0, 0, 0)
                 if (selected()) return theme.background.action.primary.selected
                 if (hovered() === tab.sessionID || dragging() === tab.sessionID)
                   return theme.background.action.primary.hovered
@@ -274,6 +275,8 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                   position="relative"
                   flexDirection="column"
                   backgroundColor={background()}
+                  border={transparent() ? (["left", "right"] as const) : undefined}
+                  borderColor={transparent() ? foreground() : undefined}
                   onMouseOver={() => setHovered(tab.sessionID)}
                   onMouseOut={() => setHovered(undefined)}
                   onMouseDown={() => {
@@ -432,11 +435,13 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
               flexDirection="row"
               paddingLeft={1}
               backgroundColor={
-                newTab()
-                  ? theme.background.action.primary.selected
-                  : addHovered()
-                    ? theme.background.action.primary.hovered
-                    : theme.background.default
+                transparent()
+                  ? RGBA.fromInts(0, 0, 0, 0)
+                  : newTab()
+                    ? theme.background.action.primary.selected
+                    : addHovered()
+                      ? theme.background.action.primary.hovered
+                      : theme.background.default
               }
               onMouseOver={() => setAddHovered(true)}
               onMouseOut={() => setAddHovered(false)}
@@ -489,7 +494,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   const tabs = props.controller ?? useSessionTabs()
   const dimensions = useTerminalDimensions()
   const theme = useTheme()
-  const { mode } = useThemes()
+  const { mode, transparent } = useThemes()
   const config = useConfig().data
   const animations = () => props.animations ?? config.animations ?? true
   const [hovered, setHovered] = createSignal<string>()
@@ -659,6 +664,9 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           const activity = () => visuals().get(tab.sessionID)?.activity ?? Number(status().complete)
           const dragged = () => dragging() === tab.sessionID
           const background = createMemo(() => {
+            // tint() drops alpha, so under /transparent tabs keep no fill and
+            // rely on the outline border (see below) to stay distinguishable.
+            if (transparent()) return RGBA.fromInts(0, 0, 0, 0)
             const lifted = (hovered() === tab.sessionID || dragged()) && !selected()
             const base = lifted ? theme.background.action.primary.hovered : theme.background.default
             // A dragged tab lifts to full selected elevation while it is held.
@@ -741,6 +749,8 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
               position="relative"
               flexDirection="row"
               backgroundColor={background()}
+              border={transparent() ? (["left", "right"] as const) : undefined}
+              borderColor={transparent() ? foreground() : undefined}
               onMouseOver={() => setHovered(tab.sessionID)}
               onMouseOut={() => setHovered(undefined)}
               onMouseDown={() => {
@@ -821,7 +831,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
         <text
           width={ADD_TAB_WIDTH}
           fg={addHovered() ? theme.text.default : theme.text.subdued}
-          bg={addHovered() ? theme.background.action.primary.hovered : undefined}
+          bg={addHovered() && !transparent() ? theme.background.action.primary.hovered : undefined}
           selectable={false}
           onMouseOver={() => setAddHovered(true)}
           onMouseOut={() => setAddHovered(false)}
