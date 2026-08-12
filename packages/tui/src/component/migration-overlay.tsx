@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useClient } from "../context/client"
-import { useTheme } from "../context/theme"
+import { overlayPlate, useTheme, useThemes } from "../context/theme"
 import { SplitBorder } from "../ui/border"
 import { useToast } from "../ui/toast"
 import { Spinner } from "./spinner"
@@ -11,6 +11,7 @@ export function MigrationOverlay() {
   const client = useClient()
   const toast = useToast()
   const theme = useTheme("overlay")
+  const { transparent } = useThemes()
   const [progress, setProgress] = createSignal<Progress>()
   const abort = new AbortController()
 
@@ -52,7 +53,7 @@ export function MigrationOverlay() {
           top={1}
           right={2}
           flexDirection="row"
-          backgroundColor={theme.background.default}
+          backgroundColor={overlayPlate(theme.background.default, transparent())}
           border={["left"]}
           borderColor={theme.text.feedback.info.default}
           customBorderChars={SplitBorder.customBorderChars}

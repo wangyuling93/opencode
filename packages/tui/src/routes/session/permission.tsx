@@ -2,7 +2,7 @@ import { createStore } from "solid-js/store"
 import { createMemo, For, Match, Show, Switch } from "solid-js"
 import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
-import { useTheme, useThemes } from "../../context/theme"
+import { useTheme, useThemes, overlayPlate } from "../../context/theme"
 import type { PermissionReply, PermissionRequest } from "@opencode-ai/client"
 import { SplitBorder } from "../../ui/border"
 import { useData } from "../../context/data"
@@ -423,6 +423,7 @@ function Prompt<const T extends Record<string, string>>(props: {
   onSelect: (option: keyof T) => void
 }) {
   const theme = useTheme("elevated")
+  const { transparent } = useThemes()
   const dimensions = useTerminalDimensions()
   const keys = Object.keys(props.options) as (keyof T)[]
   const [store, setStore] = createStore({
@@ -527,7 +528,7 @@ function Prompt<const T extends Record<string, string>>(props: {
         label: props.semanticLabel ?? props.title,
         expanded: store.expanded,
       }))}
-      backgroundColor={theme.background.default}
+      backgroundColor={overlayPlate(theme.background.default, transparent())}
       border={["left"]}
       borderColor={theme.background.action.primary.focused}
       customBorderChars={SplitBorder.customBorderChars}

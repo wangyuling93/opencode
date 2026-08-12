@@ -183,7 +183,12 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                 return value ? data.project.get(value.projectID) : undefined
               })
               const numberWidth = () => 2
-              const titleWidth = () => Math.max(1, width() - numberWidth() - 2 - (hovered() === tab.sessionID ? 1 : 0))
+              // The transparent outline border insets the content box by two cells.
+              const titleWidth = () =>
+                Math.max(
+                  1,
+                  width() - numberWidth() - 2 - (transparent() ? 2 : 0) - (hovered() === tab.sessionID ? 1 : 0),
+                )
               const title = () => tab.title ?? "Untitled session"
               const scrolling = () => hovered() === tab.sessionID && marquee.offset() > 0
               const visibleTitle = createMemo(() =>
@@ -688,8 +693,9 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           // Shortcut labels stay one cell wide: 1-9, 0 for ten, then a neutral dot.
           const numberWidth = () => 2
           // Hovering reveals the close mark, so the title's right bound shifts left of it.
+          // The transparent outline border insets the content box by one cell.
           const availableTitleWidth = () =>
-            Math.max(1, width() - 1 - numberWidth() - (hovered() === tab.sessionID ? 2 : 0))
+            Math.max(1, width() - (transparent() ? 2 : 1) - numberWidth() - (hovered() === tab.sessionID ? 2 : 0))
           const scrolling = () => hovered() === tab.sessionID && marquee.offset() > 0
           const visibleTitle = createMemo(() =>
             scrolling()
@@ -749,7 +755,8 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
               position="relative"
               flexDirection="row"
               backgroundColor={background()}
-              border={transparent() ? (["left", "right"] as const) : undefined}
+              // Adjacent tabs share one separator column: only the left border.
+              border={transparent() ? (["left"] as const) : undefined}
               borderColor={transparent() ? foreground() : undefined}
               onMouseOver={() => setHovered(tab.sessionID)}
               onMouseOut={() => setHovered(undefined)}

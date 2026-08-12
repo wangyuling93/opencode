@@ -1,9 +1,10 @@
 import { RGBA } from "@opentui/core"
-import { useTheme } from "../context/theme"
+import { overlayPlate, useTheme, useThemes } from "../context/theme"
 import { Spinner } from "./spinner"
 
 export function Reconnecting() {
   const theme = useTheme("elevated")
+  const { transparent } = useThemes()
 
   return (
     <box
@@ -13,7 +14,7 @@ export function Reconnecting() {
       right={0}
       bottom={0}
       left={0}
-      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      backgroundColor={transparent() ? RGBA.fromInts(0, 0, 0, 0) : RGBA.fromInts(0, 0, 0, 150)}
       alignItems="center"
       justifyContent="center"
     >
@@ -21,7 +22,7 @@ export function Reconnecting() {
         width={48}
         maxWidth="90%"
         flexDirection="column"
-        backgroundColor={theme.background.default}
+        backgroundColor={overlayPlate(theme.background.default, transparent())}
         paddingTop={1}
         paddingBottom={1}
         paddingLeft={2}

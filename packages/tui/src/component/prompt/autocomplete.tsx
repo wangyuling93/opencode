@@ -12,7 +12,7 @@ import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiPaths } from "../../context/runtime"
 import { useConfig } from "../../config"
 import { useLocation } from "../../context/location"
-import { useTheme } from "../../context/theme"
+import { overlayPlate, useTheme, useThemes } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "../../util/locale"
@@ -82,6 +82,7 @@ export function Autocomplete(props: {
   const keymap = Keymap.use()
   const keymapCommands = Keymap.useCommands()
   const theme = useTheme("overlay")
+  const { transparent } = useThemes()
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
   const config = useConfig().data
@@ -883,7 +884,7 @@ export function Autocomplete(props: {
     >
       <scrollbox
         ref={(r: ScrollBoxRenderable) => (scroll = r)}
-        backgroundColor={theme.background.default}
+        backgroundColor={overlayPlate(theme.background.default, transparent())}
         height={height()}
         scrollbarOptions={{ visible: false }}
         scrollAcceleration={scrollAcceleration()}
