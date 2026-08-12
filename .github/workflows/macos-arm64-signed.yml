@@ -12,6 +12,10 @@
 # .github/actions/macos-codesigning-setup and .github/scripts/macos-signing
 # are mirrored onto the v2 branch — keep them in sync when they change here.
 #
+# resolve-version records the commit it checked out (built_sha); package-*
+# and publish pin their checkout to it so a moving branch ref cannot shift
+# the build away from the commit the tag/notes are bound to.
+#
 # Internal graph (parallel after resolve; free minutes on public repos favor
 # wall-clock over serializing on one runner):
 #
@@ -71,7 +75,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.release_version || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.channel }}-${{ inputs.release_version || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -127,7 +131,9 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
-          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
+          # Pin to the commit resolve-version resolved, so a moving branch ref
+          # cannot shift the build away from the tag/notes it is released under.
+          ref: ${{ needs.resolve-version.outputs.built_sha }}
           persist-credentials: false
 
       - uses: ./.github/actions/macos-codesigning-setup
@@ -217,7 +223,8 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
-          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
+          # Pin to the commit resolve-version resolved (see package-cli).
+          ref: ${{ needs.resolve-version.outputs.built_sha }}
           persist-credentials: false
 
       - uses: ./.github/actions/macos-codesigning-setup
@@ -324,7 +331,8 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
-          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
+          # Same pinned commit the DMGs were built from (see package-cli).
+          ref: ${{ needs.resolve-version.outputs.built_sha }}
           persist-credentials: false
 
       - name: Download signed CLI DMG
