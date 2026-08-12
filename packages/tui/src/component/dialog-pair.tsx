@@ -101,7 +101,7 @@ export function DialogPair(props: { credentials?: DialogPairCredentials }) {
         <text fg={theme.text.default} attributes={TextAttributes.BOLD}>
           Pair
         </text>
-        <text fg={theme.text.subdued} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.text.feedback.warning.default} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

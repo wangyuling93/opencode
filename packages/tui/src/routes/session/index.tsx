@@ -159,6 +159,7 @@ export function Session() {
   const configState = useConfig()
   const config = configState.data
   const theme = useTheme()
+  const { transparent } = useThemes()
   const promptRef = usePromptRef()
   const session = createMemo(() => data.session.get(route.sessionID))
   const messages = () => data.session.message.list(route.sessionID)
@@ -1148,7 +1149,7 @@ export function Session() {
                 right={0}
                 bottom={0}
                 alignItems="flex-end"
-                backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
+                backgroundColor={transparent() ? RGBA.fromInts(0, 0, 0, 0) : RGBA.fromInts(0, 0, 0, 70)}
               >
                 <Sidebar sessionID={route.sessionID} />
               </box>

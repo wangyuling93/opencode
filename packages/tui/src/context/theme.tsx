@@ -22,9 +22,10 @@ import {
   type ThemeDocumentSource,
 } from "../theme"
 import { generateSystem, terminalMode } from "../theme/system"
+import { applyUiTransparency, overlayPlate } from "../theme/transparency"
 import { discoverThemes } from "../theme/discovery"
 import { createComponentTheme, type ComponentTheme } from "../theme/component"
-import { createEffect, createMemo, onCleanup, onMount, type Accessor, type ParentProps } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor, type ParentProps } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useConfig } from "../config"
@@ -79,6 +80,7 @@ export const createThemeSource = (config: string): ThemeSource => ({
 })
 
 export { discoverThemes } from "../theme/discovery"
+export { applyUiTransparency, overlayPlate } from "../theme/transparency"
 
 export {
   DEFAULT_THEMES,
@@ -116,6 +118,9 @@ type Themes = {
   unlock(): void
   setMode(mode?: "dark" | "light", persist?: boolean): boolean
   set(theme: string): boolean
+  transparent: Accessor<boolean>
+  setTransparent(value: boolean): void
+  toggleTransparent(): boolean
   onError(handler: ThemeErrorHandler): () => void
   readonly ready: boolean
 }
@@ -316,12 +321,25 @@ const themeContext = createSimpleContext({
     })
     const modes = () => selected().modes
     const mode = () => selected().mode
-    const valuesV2 = () => selected().theme
+    const [transparent, setTransparentSignal] = createSignal(config.theme?.transparent ?? false)
+    const valuesV2 = createMemo(() => {
+      const theme = selected().theme
+      return transparent() ? applyUiTransparency(theme) : theme
+    })
     valuesV2()
     themePerformance.set("Init", `${(performance.now() - initStarted).toFixed(2)} ms`)
     const current = createComponentTheme(valuesV2, mode)
 
     createEffect(() => renderer.setBackgroundColor(valuesV2().background.default))
+
+    function setTransparent(value: boolean) {
+      setTransparentSignal(value)
+      void configState
+        .update((draft) => {
+          draft.theme = { ...draft.theme, transparent: value }
+        })
+        .catch(() => {})
+    }
 
     const currentSyntax = createSyntaxStyleMemo(() => generateSyntax(valuesV2(), mode()))
     const service: Themes = {
@@ -353,6 +371,13 @@ const themeContext = createSimpleContext({
           })
           .catch(() => {})
         return true
+      },
+      transparent,
+      setTransparent,
+      toggleTransparent() {
+        const next = !transparent()
+        setTransparent(next)
+        return next
       },
       onError: themeErrors.onError,
       get ready() {

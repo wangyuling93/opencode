@@ -337,7 +337,7 @@ function CommandView(props: { title: string; output: string; message: string }) 
         <text attributes={TextAttributes.BOLD} fg={theme.text.default}>
           {props.title}
         </text>
-        <text fg={theme.text.subdued} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.text.feedback.warning.default} onMouseUp={() => dialog.clear()}>
           esc close
         </text>
       </box>

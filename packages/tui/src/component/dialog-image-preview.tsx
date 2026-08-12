@@ -42,7 +42,7 @@ export function DialogImagePreview(props: { images: readonly ImagePreviewItem[];
         <text attributes={TextAttributes.BOLD} fg={theme.text.default}>
           Image {index() + 1} of {props.images.length}
         </text>
-        <text fg={theme.text.subdued} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.text.feedback.warning.default} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

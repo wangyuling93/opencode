@@ -52,7 +52,7 @@ export function DialogProjectCopyName(props: { onConfirm: (name: string) => void
         <text attributes={TextAttributes.BOLD} fg={theme.text.default}>
           Name project copy
         </text>
-        <text fg={theme.text.subdued} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.text.feedback.warning.default} onMouseUp={() => dialog.clear()}>
           esc
         </text>
       </box>

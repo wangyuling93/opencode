@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
-import type { TerminalColors } from "@opentui/core"
+import { RGBA, type TerminalColors } from "@opentui/core"
+import { resolveThemeDocument } from "@opencode-ai/theme/tui"
 import {
   DEFAULT_THEMES,
   addTheme,
@@ -12,6 +13,7 @@ import {
   setCustomThemes,
   upsertTheme,
 } from "../src/theme"
+import { applyUiTransparency, overlayPlate } from "../src/theme/transparency"
 import { discoverThemes } from "../src/theme/discovery"
 import { configDirectories } from "../src/util/config-directories"
 import { terminalMode } from "../src/theme/system"
@@ -192,4 +194,33 @@ test("theme directories include global config before project directories", async
     global: { source: "global" },
     project: { source: "project" },
   })
+})
+
+test("applyUiTransparency clears root fills and keeps elevated plates", () => {
+  const resolved = resolveThemeDocument(parseTheme(DEFAULT_THEMES.opencode), "dark")
+  expect(resolved.background.default.a).toBeGreaterThan(0)
+  expect(resolved.background.surface.offset.a).toBeGreaterThan(0)
+  expect(resolved.background.surface.overlay.a).toBeGreaterThan(0)
+
+  const next = applyUiTransparency(resolved)
+  expect(next.background.default.a).toBe(0)
+  expect(next.background.surface.offset.a).toBe(0)
+  expect(next.background.surface.overlay.a).toBe(0)
+  expect(next.diff.background.added.a).toBe(0)
+  expect(next.diff.background.removed.a).toBe(0)
+  expect(next.diff.background.context.a).toBe(0)
+  expect(next.diff.lineNumber.background.added.a).toBe(0)
+  expect(next.diff.lineNumber.background.removed.a).toBe(0)
+  expect(next.markdown.codeBlock.a).toBe(0)
+  // Text and borders stay intact.
+  expect(next.text.default.r).toBe(resolved.text.default.r)
+  expect(next.border.default.a).toBe(resolved.border.default.a)
+})
+
+test("overlayPlate clears content overlays only under transparency", () => {
+  const opaque = RGBA.fromInts(10, 20, 30)
+  expect(overlayPlate(opaque, false)).toBe(opaque)
+  const clear = overlayPlate(opaque, true)
+  expect(clear.a).toBeGreaterThan(0)
+  expect(clear).not.toBe(opaque)
 })

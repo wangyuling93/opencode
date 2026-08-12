@@ -10,9 +10,7 @@ import {
 import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match, For } from "solid-js"
 import path from "path"
 import { useLocal } from "../../context/local"
-import { useTheme, useThemes } from "../../context/theme"
-import { tint } from "../../theme/color"
-import { EmptyBorder, SplitBorder } from "../../ui/border"
+import { overlayPlate, useTheme, useThemes } from "../../context/theme"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { useClipboard } from "../../context/clipboard"
 import { Spinner } from "../spinner"
@@ -174,7 +172,7 @@ export function Prompt(props: PromptProps) {
   const exit = useExit()
   const dimensions = useTerminalDimensions()
   const theme = useTheme()
-  const { currentSyntax: syntax } = useThemes()
+  const { currentSyntax: syntax, transparent } = useThemes()
   const animationsEnabled = createMemo(() => config.animations ?? true)
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
@@ -1482,7 +1480,8 @@ export function Prompt(props: PromptProps) {
     () => !!local.agent.current() && store.mode === "normal" && showVariant(),
     animationsEnabled,
   )
-  const borderHighlight = createMemo(() => tint(theme.border.default, highlight(), agentMetaAlpha()))
+  // Shared with the agent label so outline and mode chrome stay in sync.
+  const outlineColor = createMemo(() => fadeColor(highlight(), agentMetaAlpha()))
   const footerInput = () => ({ sessionID: props.sessionID, mode: store.mode })
 
   const placeholderText = createMemo(() => {
@@ -1538,259 +1537,225 @@ export function Prompt(props: PromptProps) {
   const maxHeight = createMemo(() => Math.max(6, Math.floor(dimensions().height / 3)))
 
   const promptBg = createMemo(() => theme.raise(theme.background.surface.offset))
+  const plate = () => overlayPlate(promptBg(), transparent())
 
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box
           width="100%"
-          border={["left"]}
-          borderColor={borderHighlight()}
-          customBorderChars={{
-            ...SplitBorder.customBorderChars,
-            bottomLeft: "╹",
-          }}
+          flexShrink={0}
+          border
+          borderStyle="rounded"
+          borderColor={outlineColor()}
+          backgroundColor={plate()}
+          paddingLeft={1}
+          paddingRight={1}
         >
-          <box
-            paddingLeft={dimensions().width < 44 ? 1 : 2}
-            paddingRight={dimensions().width < 44 ? 1 : 2}
-            paddingTop={1}
-            flexShrink={0}
-            backgroundColor={promptBg()}
-            flexGrow={1}
-            width="100%"
-          >
-            <Show when={config.prompt?.image_preview && visibleImageAttachments().length > 0}>
-              <box
-                width="100%"
-                height={imagePreviewHeight() + 1}
-                flexDirection="row"
-                flexShrink={0}
-                justifyContent="flex-start"
-                gap={1}
-                paddingBottom={1}
-              >
-                <For each={visibleImageAttachments()}>
-                  {(file, index) => {
-                    const [failed, setFailed] = createSignal(false)
-                    return (
-                      <box
-                        width={imagePreviewWidth()}
-                        height={imagePreviewHeight()}
-                        flexBasis={imagePreviewWidth()}
-                        flexShrink={1}
-                        onMouseUp={(event: MouseEvent) => {
-                          if (event.button !== 0) return
-                          event.stopPropagation()
-                          openImagePreview(index())
-                        }}
-                      >
-                        <Show
-                          when={!failed()}
-                          fallback={
-                            <box width="100%" height="100%" alignItems="center" justifyContent="center">
-                              <text fg={theme.text.subdued}>No preview</text>
-                            </box>
-                          }
-                        >
-                          <image
-                            id={`prompt-image-preview-${index()}`}
-                            source={file.uri}
-                            fit="cover"
-                            protocol="auto"
-                            width="100%"
-                            height="100%"
-                            onError={() => setFailed(true)}
-                          />
-                        </Show>
-                      </box>
-                    )
-                  }}
-                </For>
-                <Show when={imageAttachments().length > visibleImageAttachments().length}>
-                  <box
-                    width={8}
-                    height={imagePreviewHeight()}
-                    flexBasis={8}
-                    flexShrink={1}
-                    alignItems="center"
-                    justifyContent="center"
-                    onMouseUp={(event: MouseEvent) => {
-                      if (event.button !== 0) return
-                      event.stopPropagation()
-                      openImagePreview(visibleImageAttachments().length)
-                    }}
-                  >
-                    <text fg={theme.text.subdued} wrapMode="none" truncate>
-                      +{imageAttachments().length - visibleImageAttachments().length} more
-                    </text>
-                  </box>
-                </Show>
-              </box>
-            </Show>
-            <textarea
+          <Show when={config.prompt?.image_preview && visibleImageAttachments().length > 0}>
+            <box
               width="100%"
-              placeholder={placeholderText()}
-              placeholderColor={theme.text.subdued}
-              textColor={leader() ? theme.text.subdued : theme.text.default}
-              focusedTextColor={leader() ? theme.text.subdued : theme.text.default}
-              minHeight={1}
-              maxHeight={maxHeight()}
-              cursorStyle={config.cursor}
-              onContentChange={() => {
-                const value = input.plainText
-                setStore("prompt", "text", value)
-                auto()?.onInput(value)
-                syncExtmarksWithPromptParts()
-                setCursorVersion((value) => value + 1)
-              }}
-              onCursorChange={() => setCursorVersion((value) => value + 1)}
-              onKeyDown={(e: { preventDefault(): void }) => {
-                if (props.disabled) {
-                  e.preventDefault()
-                  return
-                }
-              }}
-              onSubmit={() => {
-                // IME: double-defer so the last composed character (e.g. Korean
-                // hangul) is flushed to plainText before we read it for submission.
-                setTimeout(() => setTimeout(() => submit(), 0), 0)
-              }}
-              onPaste={(event: PasteEvent) => {
-                if (props.disabled) {
-                  event.preventDefault()
-                  return
-                }
-
-                // Normalize line endings at the boundary
-                // Windows ConPTY/Terminal often sends CR-only newlines in bracketed paste
-                // Replace CRLF first, then any remaining CR
-                const normalizedText = decodePasteBytes(event.bytes).replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-
-                // Windows Terminal <1.25 can surface image-only clipboard as an
-                // empty bracketed paste. Windows Terminal 1.25+ does not.
-                if (event.bytes.byteLength === 0) {
-                  keymap.dispatch("prompt.paste")
-                  return
-                }
-
-                // Once we cross an async boundary below, the terminal may perform its
-                // default paste unless we suppress it first and handle insertion ourselves.
-                event.preventDefault()
-
-                void enqueuePaste((changed) => pasteInputText(normalizedText, changed))
-              }}
-              ref={(r: TextareaRenderable) => {
-                input = r
-                Object.assign(r, {
-                  getClipboardText: (text: string) => expandPastedTextPlaceholders(text, store.prompt.pasted),
-                })
-                setInputTarget(r)
-                if (promptPartTypeId === 0) {
-                  promptPartTypeId = input.extmarks.registerType("prompt-part")
-                }
-                props.ref?.(ref)
-                setTimeout(() => {
-                  // setTimeout is a workaround and needs to be addressed properly
-                  if (!input || input.isDestroyed) return
-                  input.cursorColor = theme.text.default
-                  if (config.cursor) input.cursorStyle = config.cursor
-                }, 0)
-              }}
-              onMouseDown={(r: MouseEvent) => {
-                if (props.disabled || r.button !== 0) return
-                r.target?.focus()
-                const extmark = input.extmarks
-                  .getAtOffset(input.cursorOffset)
-                  .find((item) => store.extmarkToPart.get(item.id)?.type === "pasted")
-                if (!extmark || !expandPastedText(extmark.id)) return
-                r.preventDefault()
-                r.stopPropagation()
-              }}
-              focusedBackgroundColor="transparent"
-              cursorColor={props.disabled ? theme.background.surface.offset : theme.text.default}
-              syntaxStyle={syntax()}
-            />
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-                <Show when={agentLabel()} fallback={<box height={1} />}>
-                  {(label) => (
-                    <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>{label()}</text>
+              height={imagePreviewHeight() + 1}
+              flexDirection="row"
+              flexShrink={0}
+              justifyContent="flex-start"
+              gap={1}
+              paddingBottom={1}
+            >
+              <For each={visibleImageAttachments()}>
+                {(file, index) => {
+                  const [failed, setFailed] = createSignal(false)
+                  return (
+                    <box
+                      width={imagePreviewWidth()}
+                      height={imagePreviewHeight()}
+                      flexBasis={imagePreviewWidth()}
+                      flexShrink={1}
+                      onMouseUp={(event: MouseEvent) => {
+                        if (event.button !== 0) return
+                        event.stopPropagation()
+                        openImagePreview(index())
+                      }}
+                    >
                       <Show
-                        when={store.mode === "normal" && local.permission.mode === "auto" && dimensions().width >= 44}
+                        when={!failed()}
+                        fallback={
+                          <box width="100%" height="100%" alignItems="center" justifyContent="center">
+                            <text fg={theme.text.subdued}>No preview</text>
+                          </box>
+                        }
                       >
-                        <text fg={fadeColor(theme.text.subdued, agentMetaAlpha())}>auto</text>
+                        <image
+                          id={`prompt-image-preview-${index()}`}
+                          source={file.uri}
+                          fit="cover"
+                          protocol="auto"
+                          width="100%"
+                          height="100%"
+                          onError={() => setFailed(true)}
+                        />
                       </Show>
-                      <Show when={store.mode === "normal" && dimensions().width >= 28}>
-                        <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-                          <text fg={fadeColor(theme.text.subdued, modelMetaAlpha())}>·</text>
-                          <text
-                            flexShrink={1}
-                            minWidth={0}
-                            wrapMode="none"
-                            truncate
-                            fg={fadeColor(leader() ? theme.text.subdued : theme.text.default, modelMetaAlpha())}
-                          >
-                            {local.model.parsed().model}
-                          </text>
-                          <Show when={dimensions().width >= 50}>
-                            <text flexShrink={0} fg={fadeColor(theme.text.subdued, modelMetaAlpha())}>
-                              {currentProviderLabel()}
-                            </text>
-                          </Show>
-                          <Show when={showVariant() && dimensions().width >= 70}>
-                            <text fg={fadeColor(theme.text.subdued, variantMetaAlpha())}>·</text>
-                            <text>
-                              <span
-                                style={{
-                                  fg: fadeColor(theme.text.feedback.warning.default, variantMetaAlpha()),
-                                  bold: true,
-                                }}
-                              >
-                                {local.model.variant.current()}
-                              </span>
-                            </text>
-                          </Show>
-                        </box>
-                      </Show>
-                    </>
-                  )}
-                </Show>
-              </box>
-              <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1} alignItems="center">
-                  {props.right}
+                    </box>
+                  )
+                }}
+              </For>
+              <Show when={imageAttachments().length > visibleImageAttachments().length}>
+                <box
+                  width={8}
+                  height={imagePreviewHeight()}
+                  flexBasis={8}
+                  flexShrink={1}
+                  alignItems="center"
+                  justifyContent="center"
+                  onMouseUp={(event: MouseEvent) => {
+                    if (event.button !== 0) return
+                    event.stopPropagation()
+                    openImagePreview(visibleImageAttachments().length)
+                  }}
+                >
+                  <text fg={theme.text.subdued} wrapMode="none" truncate>
+                    +{imageAttachments().length - visibleImageAttachments().length} more
+                  </text>
                 </box>
               </Show>
             </box>
-          </box>
-        </box>
-        <box
-          height={1}
-          border={["left"]}
-          borderColor={borderHighlight()}
-          customBorderChars={{
-            ...EmptyBorder,
-            vertical: promptBg().a !== 0 ? "╹" : " ",
-          }}
-        >
-          <box
-            height={1}
-            border={["bottom"]}
-            borderColor={promptBg()}
-            customBorderChars={
-              promptBg().a !== 0
-                ? {
-                    ...EmptyBorder,
-                    horizontal: "▀",
-                  }
-                : {
-                    ...EmptyBorder,
-                    horizontal: " ",
-                  }
-            }
+          </Show>
+          <textarea
+            width="100%"
+            placeholder={placeholderText()}
+            placeholderColor={theme.text.subdued}
+            textColor={leader() ? theme.text.subdued : theme.text.default}
+            focusedTextColor={leader() ? theme.text.subdued : theme.text.default}
+            minHeight={1}
+            maxHeight={maxHeight()}
+            cursorStyle={config.cursor}
+            onContentChange={() => {
+              const value = input.plainText
+              setStore("prompt", "text", value)
+              auto()?.onInput(value)
+              syncExtmarksWithPromptParts()
+              setCursorVersion((value) => value + 1)
+            }}
+            onCursorChange={() => setCursorVersion((value) => value + 1)}
+            onKeyDown={(e: { preventDefault(): void }) => {
+              if (props.disabled) {
+                e.preventDefault()
+                return
+              }
+            }}
+            onSubmit={() => {
+              // IME: double-defer so the last composed character (e.g. Korean
+              // hangul) is flushed to plainText before we read it for submission.
+              setTimeout(() => setTimeout(() => submit(), 0), 0)
+            }}
+            onPaste={(event: PasteEvent) => {
+              if (props.disabled) {
+                event.preventDefault()
+                return
+              }
+
+              // Normalize line endings at the boundary
+              // Windows ConPTY/Terminal often sends CR-only newlines in bracketed paste
+              // Replace CRLF first, then any remaining CR
+              const normalizedText = decodePasteBytes(event.bytes).replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+
+              // Windows Terminal <1.25 can surface image-only clipboard as an
+              // empty bracketed paste. Windows Terminal 1.25+ does not.
+              if (event.bytes.byteLength === 0) {
+                keymap.dispatch("prompt.paste")
+                return
+              }
+
+              // Once we cross an async boundary below, the terminal may perform its
+              // default paste unless we suppress it first and handle insertion ourselves.
+              event.preventDefault()
+
+              void enqueuePaste((changed) => pasteInputText(normalizedText, changed))
+            }}
+            ref={(r: TextareaRenderable) => {
+              input = r
+              Object.assign(r, {
+                getClipboardText: (text: string) => expandPastedTextPlaceholders(text, store.prompt.pasted),
+              })
+              setInputTarget(r)
+              if (promptPartTypeId === 0) {
+                promptPartTypeId = input.extmarks.registerType("prompt-part")
+              }
+              props.ref?.(ref)
+              setTimeout(() => {
+                // setTimeout is a workaround and needs to be addressed properly
+                if (!input || input.isDestroyed) return
+                input.cursorColor = theme.text.default
+                if (config.cursor) input.cursorStyle = config.cursor
+              }, 0)
+            }}
+            onMouseDown={(r: MouseEvent) => {
+              if (props.disabled || r.button !== 0) return
+              r.target?.focus()
+              const extmark = input.extmarks
+                .getAtOffset(input.cursorOffset)
+                .find((item) => store.extmarkToPart.get(item.id)?.type === "pasted")
+              if (!extmark || !expandPastedText(extmark.id)) return
+              r.preventDefault()
+              r.stopPropagation()
+            }}
+            focusedBackgroundColor="transparent"
+            cursorColor={props.disabled ? plate() : theme.text.default}
+            syntaxStyle={syntax()}
           />
+          <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
+            <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+              <Show when={agentLabel()} fallback={<box height={1} />}>
+                {(label) => (
+                  <>
+                    <text fg={outlineColor()}>{label()}</text>
+                    <Show
+                      when={store.mode === "normal" && local.permission.mode === "auto" && dimensions().width >= 44}
+                    >
+                      <text fg={fadeColor(theme.text.subdued, agentMetaAlpha())}>auto</text>
+                    </Show>
+                    <Show when={store.mode === "normal" && dimensions().width >= 28}>
+                      <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+                        <text fg={fadeColor(theme.text.subdued, modelMetaAlpha())}>·</text>
+                        <text
+                          flexShrink={1}
+                          minWidth={0}
+                          wrapMode="none"
+                          truncate
+                          fg={fadeColor(leader() ? theme.text.subdued : theme.text.default, modelMetaAlpha())}
+                        >
+                          {local.model.parsed().model}
+                        </text>
+                        <Show when={dimensions().width >= 50}>
+                          <text flexShrink={0} fg={fadeColor(theme.text.subdued, modelMetaAlpha())}>
+                            {currentProviderLabel()}
+                          </text>
+                        </Show>
+                        <Show when={showVariant() && dimensions().width >= 70}>
+                          <text fg={fadeColor(theme.text.subdued, variantMetaAlpha())}>·</text>
+                          <text>
+                            <span
+                              style={{
+                                fg: fadeColor(theme.text.feedback.warning.default, variantMetaAlpha()),
+                                bold: true,
+                              }}
+                            >
+                              {local.model.variant.current()}
+                            </span>
+                          </text>
+                        </Show>
+                      </box>
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </box>
+            <Show when={hasRightContent()}>
+              <box flexDirection="row" gap={1} alignItems="center">
+                {props.right}
+              </box>
+            </Show>
+          </box>
         </box>
         <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Slot path="prompt.footer" input={footerInput()}>

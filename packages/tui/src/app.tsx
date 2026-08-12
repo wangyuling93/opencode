@@ -157,6 +157,7 @@ const appBindingCommands = [
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
+  "theme.transparent.toggle",
   "help.show",
   "docs.open",
   "diff.open",
@@ -469,7 +470,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   const client = useClient()
   const toast = useToast()
   const theme = useTheme()
-  const { mode, supports, setMode, locked, lock, unlock } = useThemes()
+  const { mode, supports, setMode, locked, lock, unlock, transparent, toggleTransparent } = useThemes()
   const data = useData()
   const location = useLocation()
   const exit = useExit()
@@ -956,6 +957,20 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "System",
       },
       {
+        name: "theme.transparent.toggle",
+        title: transparent() ? "Disable transparent UI" : "Enable transparent UI",
+        slash: { name: "transparent", aliases: ["transparency", "toggle-transparent"] },
+        run: () => {
+          const next = toggleTransparent()
+          toast.show({
+            variant: "info",
+            message: next ? "Transparent UI on — terminal wallpaper can show through" : "Transparent UI off",
+          })
+          dialog.clear()
+        },
+        category: "System",
+      },
+      {
         name: "help.show",
         title: "Help",
         slash: { name: "help" },
@@ -1216,7 +1231,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         evt.preventDefault()
         evt.stopPropagation()
       }}
-      onMouseUp={copyOnSelectEnabled() ? () => Selection.copy(renderer, toast, clipboard) : undefined}
+      onMouseUp={copyOnSelectEnabled() ? () => Selection.copy(renderer, toast, clipboard, { keep: true }) : undefined}
     >
       <box flexGrow={1} minHeight={0} flexDirection="row">
         <Show when={tabsVisible() && tabsVertical()}>

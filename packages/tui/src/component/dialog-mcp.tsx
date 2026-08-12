@@ -199,7 +199,7 @@ function DialogMcpError(props: { server: McpServer; onBack: () => void }) {
         <text attributes={TextAttributes.BOLD} fg={theme.text.default}>
           MCP server: {props.server.name}
         </text>
-        <text fg={theme.text.subdued} onMouseUp={props.onBack}>
+        <text fg={theme.text.feedback.warning.default} onMouseUp={props.onBack}>
           esc back
         </text>
       </box>

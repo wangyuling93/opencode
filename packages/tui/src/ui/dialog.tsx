@@ -1,12 +1,13 @@
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
 import { Keymap } from "../context/keymap"
-import { useTheme } from "../context/theme"
+import { overlayPlate, useTheme, useThemes } from "../context/theme"
 import { MouseButton, Renderable, RGBA } from "@opentui/core"
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
 import { useClipboard } from "../context/clipboard"
 import { useConfig } from "../config"
+import * as Selection from "../util/selection"
 
 export type DialogSize = "medium" | "large" | "xlarge"
 
@@ -25,7 +26,14 @@ export function Dialog(
 ) {
   const dimensions = useTerminalDimensions()
   const theme = useTheme("elevated")
+  const { transparent } = useThemes()
   const renderer = useRenderer()
+
+  // Content-sized clear only (not full-frame dim). See overlayPlate.
+  const plate = () => overlayPlate(theme.background.default, transparent())
+  // Semi-transparent black paints as solid black cell backgrounds in the terminal
+  // (no glass blend), so keep full-screen dimmers fully clear under /transparent.
+  const backdrop = () => (transparent() ? RGBA.fromInts(0, 0, 0, 0) : RGBA.fromInts(0, 0, 0, 150))
 
   let dismiss = false
   return (
@@ -49,7 +57,7 @@ export function Dialog(
       paddingTop={props.centered ? 0 : dimensions().height / 4}
       left={0}
       top={0}
-      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      backgroundColor={backdrop()}
     >
       <box
         onMouseUp={(e: { stopPropagation(): void }) => {
@@ -61,8 +69,15 @@ export function Dialog(
         }}
         width={dialogWidth(props.size ?? "medium")}
         maxWidth={dimensions().width - 2}
-        backgroundColor={theme.background.default}
+        backgroundColor={plate()}
+        // Grok-style modal window: clear only the content rect, add a muted rounded outline.
+        border
+        borderStyle="rounded"
+        borderColor={theme.text.subdued}
         paddingTop={1}
+        paddingBottom={1}
+        paddingLeft={1}
+        paddingRight={1}
       >
         {props.children}
       </box>
@@ -202,17 +217,6 @@ export function DialogProvider(props: ParentProps) {
   const config = useConfig()
   const copyOnSelectEnabled = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
 
-  function copySelection() {
-    const text = renderer.getSelection()?.getSelectedText()
-    if (!text) return false
-    void clipboard.write(text).then(
-      () => toast.show({ message: "Copied to clipboard", variant: "info" }),
-      (error) => toast.error(error),
-    )
-    renderer.clearSelection()
-    return true
-  }
-
   return (
     <ctx.Provider value={value}>
       {props.children}
@@ -223,11 +227,11 @@ export function DialogProvider(props: ParentProps) {
           if (copyOnSelectEnabled()) return
           if (evt.button !== MouseButton.RIGHT) return
 
-          if (!copySelection()) return
+          if (!Selection.copy(renderer, toast, clipboard)) return
           evt.preventDefault()
           evt.stopPropagation()
         }}
-        onMouseUp={copyOnSelectEnabled() ? copySelection : undefined}
+        onMouseUp={copyOnSelectEnabled() ? () => Selection.copy(renderer, toast, clipboard, { keep: true }) : undefined}
       >
         <Show when={value.stack.length}>
           <Dialog onClose={() => value.clear()} size={value.size} centered={value.centered}>
