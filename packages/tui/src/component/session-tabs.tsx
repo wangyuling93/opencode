@@ -209,7 +209,11 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                   return theme.background.action.primary.hovered
                 return theme.background.default
               })
-              const pulseBackground = createMemo(() => tint(theme.background.default, background(), background().a))
+              // tint() drops alpha; restore it so cleared /transparent pulses stay clear.
+              const pulseBackground = createMemo(() => {
+                const tinted = tint(theme.background.default, background(), background().a)
+                return RGBA.fromValues(tinted.r, tinted.g, tinted.b, background().a)
+              })
               const numberColor = () => {
                 if (status().attention) return theme.text.feedback.warning.default
                 if (status().unread === "error") return theme.text.feedback.error.default
@@ -275,12 +279,14 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
               }
               return (
                 <box
-                  height={2}
+                  // The four-sided outline needs top/bottom border rows around the
+                  // two content rows, so the rail grows under /transparent.
+                  height={transparent() ? 4 : 2}
                   width="100%"
                   position="relative"
                   flexDirection="column"
                   backgroundColor={background()}
-                  border={transparent() ? (["left", "right"] as const) : undefined}
+                  border={transparent() ? true : undefined}
                   borderColor={transparent() ? foreground() : undefined}
                   onMouseOver={() => setHovered(tab.sessionID)}
                   onMouseOut={() => setHovered(undefined)}
@@ -329,7 +335,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                   />
                   <Show when={index() === items().length - 1}>
                     <TabPulse
-                      top={2}
+                      top={transparent() ? 4 : 2}
                       edge="below"
                       enabled={animations()}
                       active={runs()}
@@ -631,16 +637,20 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   return (
     <box
       ref={(element) => (strip = element)}
-      height={1}
+      height={transparent() ? 3 : 1}
       flexShrink={0}
       position="relative"
       flexDirection="row"
+      alignItems={transparent() ? "center" : undefined}
       zIndex={1}
       renderAfter={function (buffer) {
         const x = Math.max(0, this.screenX)
         const y = this.screenY + this.height
         const width = Math.min(this.width, buffer.width - x)
         if (y < 0 || y >= buffer.height || width <= 0) return
+        // Under /transparent the tabs carry their own bottom border; the fill
+        // (and its alpha) fades with the cleared plate instead of painting a
+        // solid strip below the bar.
         buffer.fillRect(
           x,
           y,
@@ -650,7 +660,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
             theme.background.default.r,
             theme.background.default.g,
             theme.background.default.b,
-            mode() === "light" ? 0.14 : 0.28,
+            theme.background.default.a * (mode() === "light" ? 0.14 : 0.28),
           ),
         )
       }}
@@ -693,9 +703,10 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           // Shortcut labels stay one cell wide: 1-9, 0 for ten, then a neutral dot.
           const numberWidth = () => 2
           // Hovering reveals the close mark, so the title's right bound shifts left of it.
-          // The transparent outline border insets the content box by one cell.
+          // The transparent outline border insets the content box (two cells) plus the
+          // leading spacer.
           const availableTitleWidth = () =>
-            Math.max(1, width() - (transparent() ? 2 : 1) - numberWidth() - (hovered() === tab.sessionID ? 2 : 0))
+            Math.max(1, width() - (transparent() ? 3 : 1) - numberWidth() - (hovered() === tab.sessionID ? 2 : 0))
           const scrolling = () => hovered() === tab.sessionID && marquee.offset() > 0
           const visibleTitle = createMemo(() =>
             scrolling()
@@ -752,11 +763,12 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           return (
             <box
               width={width()}
+              height={transparent() ? 3 : undefined}
               position="relative"
               flexDirection="row"
               backgroundColor={background()}
-              // Adjacent tabs share one separator column: only the left border.
-              border={transparent() ? (["left"] as const) : undefined}
+              // Four-sided outline: adjacent tabs share the column between them.
+              border={transparent() ? true : undefined}
               borderColor={transparent() ? foreground() : undefined}
               onMouseOver={() => setHovered(tab.sessionID)}
               onMouseOut={() => setHovered(undefined)}

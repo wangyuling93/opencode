@@ -560,6 +560,10 @@ class TabPulseRenderable extends Renderable {
       )
     const glowTail = Math.min(this._glowTail, Math.max(1, this.width - 2))
     const outerGlowTail = Math.min(this._outerGlowTail, Math.max(1, this.width - 2))
+    // blendTabPulseColor only touches RGB; keep the backing plate's alpha so a
+    // cleared /transparent tab stays clear while the run sweep is active.
+    this.renderColor.a = this._backgroundColor.a
+    this.outerRenderColor.a = this._backgroundColor.a
     for (let index = 0; index < this.width; index++) {
       // Skip per-cell sweep and glow math when that stage is idle, e.g. a steady breathing glow.
       const sweep =
