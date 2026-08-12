@@ -80,11 +80,19 @@ jobs:
       release_name: ${{ steps.resolve.outputs.release_name }}
       channel: ${{ steps.resolve.outputs.channel }}
       cli_channel: ${{ steps.resolve.outputs.cli_channel }}
+      built_sha: ${{ steps.sha.outputs.sha }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
           ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
           persist-credentials: false
+
+      # The dispatch SHA belongs to the branch the workflow file lives on (dev);
+      # beta builds from v2, so bind the tag and release to the commit actually built.
+      - name: Resolve built commit
+        id: sha
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Resolve release version and tag
         id: resolve
@@ -92,8 +100,11 @@ jobs:
         env:
           INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
           INPUT_CHANNEL: ${{ inputs.channel }}
+          GITHUB_SHA: ${{ steps.sha.outputs.sha }}
           # prod (dev branch) tracks the classic CLI version; beta (v2 branch)
           # has no packages/opencode, so desktop tracks the release cadence.
+          # Note: the opencode2 binary embeds this version, so its npm-channel
+          # auto-update no-ops when it is above the published @opencode-ai/cli.
           PACKAGE_JSON: ${{ inputs.channel == 'beta' && 'packages/desktop/package.json' || 'packages/opencode/package.json' }}
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
@@ -361,9 +372,14 @@ jobs:
         shell: bash
         env:
           CHANNEL: ${{ inputs.channel }}
+          BUILT_SHA: ${{ needs.resolve-version.outputs.built_sha }}
         run: |
           set -euo pipefail
           notes_path="${RUNNER_TEMP}/release-notes.md"
+          # beta checks out v2, so the dispatch SHA (dev) is not in this clone.
+          if ! git cat-file -e "${BUILT_SHA}^{commit}" 2>/dev/null; then
+            git fetch --depth=1 origin "${BUILT_SHA}"
+          fi
           {
             echo "Signed, notarized, and stapled Apple Silicon (mac-arm64) builds."
             echo
@@ -384,9 +400,9 @@ jobs:
             echo
             echo "Channel: \`${{ needs.resolve-version.outputs.channel }}\`"
             echo
-            echo "Built from \`${GITHUB_SHA}\`."
+            echo "Built from \`${BUILT_SHA}\`."
             echo
-            git log -1 --format=%B "${GITHUB_SHA}^{commit}"
+            git log -1 --format=%B "${BUILT_SHA}^{commit}"
           } > "${notes_path}"
           echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
 
@@ -396,7 +412,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: ${{ needs.resolve-version.outputs.release_name }}
           tag_name: ${{ needs.resolve-version.outputs.release_tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.resolve-version.outputs.built_sha }}
           body_path: ${{ steps.notes.outputs.path }}
           files: ${{ steps.assets.outputs.files }}
           overwrite_files: true
