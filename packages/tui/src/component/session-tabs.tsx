@@ -137,6 +137,8 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
       ),
   )
   const itemStatus = (tab: SessionTab) => statuses().get(tab.sessionID)!
+  // Rows per item plus the 1-cell gap; the transparent outline adds two border rows.
+  const itemStride = () => (transparent() ? 5 : 3)
   let rail: { screenY: number } | undefined
   let scroll: ScrollBoxRenderable | undefined
 
@@ -150,13 +152,13 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
   createEffect(() => {
     if (!scroll) return
     // The promoted new-session slot sits below the list, so bring the rail's bottom into view.
-    if (newTab()) return scroll.scrollTo(Math.max(0, items().length * 3 + 1 - scroll.viewport.height))
+    if (newTab()) return scroll.scrollTo(Math.max(0, items().length * itemStride() + 1 - scroll.viewport.height))
     const index = items().findIndex((tab) => tab.sessionID === activeID())
     if (index === -1) return
-    const top = index * 3
+    const top = index * itemStride()
     if (top < scroll.scrollTop) return scroll.scrollTo(top)
-    if (top + 2 > scroll.scrollTop + scroll.viewport.height) {
-      scroll.scrollTo(top + 2 - scroll.viewport.height)
+    if (top + itemStride() - 1 > scroll.scrollTop + scroll.viewport.height) {
+      scroll.scrollTo(top + itemStride() - 1 - scroll.viewport.height)
     }
   })
 
@@ -301,7 +303,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                       0,
                       Math.min(
                         tabs.tabs().length - 1,
-                        Math.floor((event.y - rail.screenY - 1 + (scroll?.scrollTop ?? 0)) / 3),
+                        Math.floor((event.y - rail.screenY - 1 + (scroll?.scrollTop ?? 0)) / itemStride()),
                       ),
                     )
                     if (target !== index() && preview()?.index !== target)
