@@ -60,7 +60,7 @@ export function createHomeSessionsController(home: HomeController) {
   }))
   const sessionLoad = useQuery(() => ({
     queryKey: homeSessions().indexKey,
-    enabled: !!home.server.focusedContext(),
+    enabled: home.server.focusedContext()?.sdk.connection.status() === "connected",
     queryFn: async ({ signal }) => {
       const ctx = home.server.focusedContext()
       if (!ctx) return { sessions: [], eventSequence: 0 }
@@ -295,13 +295,13 @@ function groupSessions(records: HomeSessionRecord[], language: ReturnType<typeof
 export type HomeSessionsController = ReturnType<typeof createHomeSessionsController>
 
 export function HomeSessionStatusController(props: {
-  server: Accessor<ServerConnection.Key>
+  server: ServerConnection.Key
   record: HomeSessionRecord
   isOpenTab: (record: HomeSessionRecord) => boolean
   render: (state: { unread: Accessor<boolean>; loading: Accessor<boolean>; open: Accessor<boolean> }) => JSX.Element
 }) {
   const avatar = useSessionTabAvatarState(
-    props.server,
+    () => props.server,
     () => props.record.session.location.directory,
     () => props.record.session.id,
   )

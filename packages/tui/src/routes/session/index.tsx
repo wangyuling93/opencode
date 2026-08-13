@@ -105,7 +105,7 @@ import { useArgs } from "../../context/args"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
 import { useSessionTabs } from "../../context/session-tabs"
 import { createSingleFlight } from "../../util/single-flight"
-import type { SessionPending } from "@opencode-ai/schema/session-pending"
+import type { SessionInbox } from "@opencode-ai/schema/session-inbox"
 import { generateThinkingSyntax } from "./thinking-syntax"
 import { createDelayedPresence } from "../../util/delayed-presence"
 
@@ -133,8 +133,8 @@ const context = createContext<{
   diffWrapMode: () => "word" | "none"
   models: () => ModelInfo[]
   config: ReturnType<typeof useConfig>["data"]
-  mutatePending: (action: PendingAction, inputID: string) => Promise<boolean>
-  pendingDelivery: (inputID: string) => SessionPending.Delivery | undefined
+  mutatePending: (action: PendingAction, inboxID: string) => Promise<boolean>
+  pendingDelivery: (inboxID: string) => SessionInbox.Delivery | undefined
 }>()
 
 function use() {
@@ -208,7 +208,7 @@ export function Session() {
   )
   const pendingDeliveries = createMemo(() => new Map(pendingUsers().map((item) => [item.id, item.delivery])))
   const queuedPrompts = createMemo(() =>
-    pendingUsers().flatMap((item) => (item.delivery === "queue" ? [{ id: item.id, text: item.data.text }] : [])),
+    pendingUsers().flatMap((item) => (item.delivery === "queue" ? [{ id: item.id, text: item.payload.text }] : [])),
   )
   const [composer, setComposer] = createStore({
     open: false,
@@ -399,14 +399,14 @@ export function Session() {
   const dialog = useDialog()
   const renderer = useRenderer()
   const runPendingAction = createSingleFlight<string>()
-  const mutatePending = async (action: PendingAction, inputID: string) => {
-    const result = await runPendingAction(inputID, async () => {
+  const mutatePending = async (action: PendingAction, inboxID: string) => {
+    const result = await runPendingAction(inboxID, async () => {
       const request =
         action === "steer"
-          ? client.api.session.pending.steer({ sessionID: route.sessionID, inputID })
+          ? client.api.session.inbox.steer({ sessionID: route.sessionID, inboxID })
           : action === "queue"
-            ? client.api.session.pending.queue({ sessionID: route.sessionID, inputID })
-            : client.api.session.pending.cancel({ sessionID: route.sessionID, inputID })
+            ? client.api.session.inbox.queue({ sessionID: route.sessionID, inboxID })
+            : client.api.session.inbox.cancel({ sessionID: route.sessionID, inboxID })
       const error = await request.then(
         () => undefined,
         (error) => error,
@@ -1034,7 +1034,7 @@ export function Session() {
         models,
         config,
         mutatePending,
-        pendingDelivery: (inputID) => pendingDeliveries().get(inputID),
+        pendingDelivery: (inboxID) => pendingDeliveries().get(inboxID),
       }}
     >
       <box flexDirection="row" flexGrow={1} minHeight={0}>
@@ -1702,6 +1702,15 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
 function SessionSwitchMessageV2(props: { message: SessionMessageInfo }) {
   const ctx = use()
   const theme = useTheme()
+  if (props.message.type === "location-switched")
+    return (
+      <box paddingLeft={3}>
+        <text>
+          <span style={{ fg: theme.text.subdued }}>↳ Moved to </span>
+          <span style={{ fg: theme.text.feedback.info.default }}>{props.message.location.directory}</span>
+        </text>
+      </box>
+    )
   const text = () => {
     if (props.message.type === "agent-switched") {
       const agent = Locale.titlecase(props.message.agent)
@@ -1711,7 +1720,6 @@ function SessionSwitchMessageV2(props: { message: SessionMessageInfo }) {
     }
     if (props.message.type === "model-switched")
       return switchLabel(props.message.model, ctx.models(), props.message.previous)
-    if (props.message.type === "location-switched") return `Switched location to ${props.message.location.directory}`
     return ""
   }
   return (
@@ -1984,6 +1992,7 @@ function UserMessage(props: { message: SessionMessageUser }) {
         border={["left"]}
         borderColor={delivery() ? theme.border.default : color()}
         customBorderChars={SplitBorder.customBorderChars}
+        backgroundColor={theme.background.default}
       >
         <SessionImages images={images()} paddingLeft={2} />
         <box
@@ -2081,13 +2090,16 @@ function UserMessage(props: { message: SessionMessageUser }) {
 
 function QueuedPromptDock(props: { prompts: { id: string; text: string }[]; onOpen: () => void }) {
   const theme = useTheme("elevated")
-  const next = createMemo(() => props.prompts[0]?.text)
+  const [hover, setHover] = createSignal(false)
+  const next = createMemo(() => props.prompts[0]?.text.replaceAll("\n", " "))
 
   return (
     <box
       border={["left"]}
       borderColor={theme.border.default}
       customBorderChars={SplitBorder.customBorderChars}
+      onMouseOver={() => setHover(true)}
+      onMouseOut={() => setHover(false)}
       onMouseUp={props.onOpen}
     >
       <box
@@ -2096,7 +2108,7 @@ function QueuedPromptDock(props: { prompts: { id: string; text: string }[]; onOp
         paddingBottom={1}
         paddingLeft={2}
         paddingRight={1}
-        backgroundColor={theme.background.default}
+        backgroundColor={hover() ? theme.raise(theme.background.default) : theme.background.default}
         flexDirection="row"
       >
         <text fg={theme.text.subdued} wrapMode="none" truncate flexGrow={1} flexShrink={1} minWidth={0}>
