@@ -12,8 +12,6 @@ type TabPulseOptions = RenderableOptions<TabPulseRenderable> & {
   outerComplete?: boolean
   glow?: boolean
   outerGlow?: boolean
-  breathe?: boolean
-  outerBreathe?: boolean
   color?: RGBA
   outerColor?: RGBA
   glowColor?: RGBA
@@ -49,8 +47,9 @@ const GLOW_IGNITION_DURATION = 600
 const GLOW_IGNITION_PEAK = 1.5
 const GLOW_IGNITION_ATTACK = 0.3
 const GLOW_FADE_OUT = 200
-const GLOW_BREATHE_PERIOD = 3_600
-const GLOW_BREATHE_RISE = 0.25
+const GLOW_RELEASE_DURATION = 900
+const GLOW_RELEASE_ATTACK = 0.12
+const GLOW_RELEASE_PEAK = 1.25
 const GLOW_TAIL = 12
 const GLOW_OPACITY = 0.16
 const DEFAULT_FOREGROUND = RGBA.defaultForeground()
@@ -79,6 +78,8 @@ export const unreadGlowIntensity = (index: number, width: number, maximumTail = 
   const tail = Math.min(maximumTail, Math.max(1, width - 2))
   return glowIntensityAt(index, tail)
 }
+/** How far a resolving glow has diffused: the resting tail spreads across the full width as it thins away. */
+const glowReleaseSpread = (progress: number, tail: number, width: number) => tail + smootherstep(progress) * width
 export function blendTabPulseColor(
   output: RGBA,
   background: RGBA,
@@ -91,18 +92,30 @@ export function blendTabPulseColor(
   flash: number,
   completion: number,
 ) {
-  output.r = background.r + (glowColor.r - background.r) * glow
-  output.g = background.g + (glowColor.g - background.g) * glow
-  output.b = background.b + (glowColor.b - background.b) * glow
-  output.r += (runningColor.r - output.r) * running
-  output.g += (runningColor.g - output.g) * running
-  output.b += (runningColor.b - output.b) * running
-  output.r += (flashColor.r - output.r) * flash
-  output.g += (flashColor.g - output.g) * flash
-  output.b += (flashColor.b - output.b) * flash
-  output.r += (completionColor.r - output.r) * completion
-  output.g += (completionColor.g - output.g) * completion
-  output.b += (completionColor.b - output.b) * completion
+  if (glow === 0) {
+    output.r = background.r
+    output.g = background.g
+    output.b = background.b
+  } else {
+    output.r = background.r + (glowColor.r - background.r) * glow
+    output.g = background.g + (glowColor.g - background.g) * glow
+    output.b = background.b + (glowColor.b - background.b) * glow
+  }
+  if (running !== 0) {
+    output.r += (runningColor.r - output.r) * running
+    output.g += (runningColor.g - output.g) * running
+    output.b += (runningColor.b - output.b) * running
+  }
+  if (flash !== 0) {
+    output.r += (flashColor.r - output.r) * flash
+    output.g += (flashColor.g - output.g) * flash
+    output.b += (flashColor.b - output.b) * flash
+  }
+  if (completion !== 0) {
+    output.r += (completionColor.r - output.r) * completion
+    output.g += (completionColor.g - output.g) * completion
+    output.b += (completionColor.b - output.b) * completion
+  }
 }
 
 /** A one-shot animation clock: level() follows shape over duration, scaled by the value passed to start. */
@@ -140,6 +153,10 @@ class Envelope {
     return this.clock !== undefined
   }
 
+  get progress() {
+    return this.clock === undefined ? undefined : this.clock / this.duration
+  }
+
   level() {
     return this.clock === undefined ? 0 : this.scale * this.shape(this.clock / this.duration)
   }
@@ -154,7 +171,6 @@ type PulseStateOptions = {
   promptPulse: number
   complete: boolean
   glow: boolean
-  breathe: boolean
 }
 
 class PulseState {
@@ -163,9 +179,7 @@ class PulseState {
   private promptPulse: number
   private complete: boolean
   private glow: boolean
-  private breathe: boolean
   private clock = 0
-  private breatheClock = 0
   private completionPending = false
   private runAttack = new Envelope(RUN_ATTACK, smootherstep)
   private runFade = new Envelope(RUN_FADE_OUT, fadeOut)
@@ -173,7 +187,19 @@ class PulseState {
   private edgeFlash = new Envelope(EDGE_FLASH_DURATION, (progress) => attackDecay(progress, EDGE_FLASH_ATTACK, 1, 0))
   private ignition = new Envelope(GLOW_IGNITION_DURATION, glowIgnitionLevel)
   private glowOff = new Envelope(GLOW_FADE_OUT, fadeOut)
-  private envelopes = [this.runAttack, this.runFade, this.completionPulse, this.edgeFlash, this.ignition, this.glowOff]
+  // A resolving glow's send-off: a gentle swell that decays while the spatial profile diffuses outward.
+  private release = new Envelope(GLOW_RELEASE_DURATION, (progress) =>
+    attackDecay(progress, GLOW_RELEASE_ATTACK, GLOW_RELEASE_PEAK, 0),
+  )
+  private envelopes = [
+    this.runAttack,
+    this.runFade,
+    this.completionPulse,
+    this.edgeFlash,
+    this.ignition,
+    this.glowOff,
+    this.release,
+  ]
 
   constructor(options: PulseStateOptions) {
     this.enabled = options.enabled
@@ -181,16 +207,11 @@ class PulseState {
     this.promptPulse = options.promptPulse
     this.complete = options.complete
     this.glow = options.glow
-    this.breathe = options.breathe
     if (this.enabled && this.active) this.runAttack.start()
   }
 
-  private get breathing() {
-    return this.enabled && this.glow && this.breathe
-  }
-
   get live() {
-    return this.active || this.breathing || this.envelopes.some(envelopeActive)
+    return this.enabled && (this.active || this.envelopes.some(envelopeActive))
   }
 
   get running() {
@@ -208,11 +229,15 @@ class PulseState {
 
   get glowLevel() {
     if (!this.glow) return this.glowOff.level()
-    const base = this.ignition.active ? this.ignition.level() : 1
-    if (!this.breathing) return base
-    return (
-      base * (1 + GLOW_BREATHE_RISE * 0.5 * (1 - Math.cos((2 * Math.PI * this.breatheClock) / GLOW_BREATHE_PERIOD)))
-    )
+    return this.ignition.active ? this.ignition.level() : 1
+  }
+
+  get releaseLevel() {
+    return this.release.level()
+  }
+
+  get releaseProgress() {
+    return this.release.progress
   }
 
   setEnabled(value: boolean) {
@@ -221,7 +246,6 @@ class PulseState {
     if (!value) {
       for (const envelope of this.envelopes) envelope.stop()
       this.completionPending = false
-      this.breatheClock = 0
     } else if (this.active) {
       this.runAttack.restart()
     }
@@ -271,28 +295,24 @@ class PulseState {
 
   setGlow(value: boolean) {
     if (value === this.glow) return false
-    if (this.enabled && !value) this.glowOff.start(this.glowLevel)
+    if (this.enabled && !value) {
+      // Resolving the glow sends it off: residual glow drains while the release diffuses outward.
+      this.glowOff.start(this.glowLevel)
+      this.release.restart(Math.max(1, this.glowLevel))
+    }
     this.glow = value
     this.ignition.stop()
-    this.breatheClock = 0
     if (this.enabled && value) {
       this.glowOff.stop()
+      this.release.stop()
       this.ignition.start()
     }
     return true
   }
 
-  setBreathe(value: boolean) {
-    if (value === this.breathe) return false
-    this.breathe = value
-    this.breatheClock = 0
-    return true
-  }
-
   advance(deltaTime: number) {
-    if (!this.enabled) return
+    if (!this.live) return
     if (this.active || this.runFade.active) this.clock += deltaTime
-    if (this.breathing) this.breatheClock += deltaTime
     for (const envelope of this.envelopes) envelope.advance(deltaTime)
     if (!this.completionPending) return
     if (this.complete) {
@@ -340,17 +360,13 @@ class TabPulseRenderable extends Renderable {
     const enabled = options.enabled ?? true
     const active = options.active ?? false
     const glow = options.glow ?? false
-    const breathe = options.breathe ?? false
     const edge = options.edge
     const outerActive = options.outerActive ?? active
     const outerGlow = options.outerGlow ?? glow
-    const outerBreathe = options.outerBreathe ?? breathe
     super(ctx, {
       ...options,
       height: 1,
-      live:
-        enabled &&
-        (active || (glow && breathe) || (edge !== undefined && (outerActive || (outerGlow && outerBreathe)))),
+      live: enabled && (active || (edge !== undefined && outerActive)),
     })
     this._enabled = enabled
     this.inner = new PulseState({
@@ -359,7 +375,6 @@ class TabPulseRenderable extends Renderable {
       promptPulse: options.promptPulse ?? 0,
       complete: options.complete ?? false,
       glow,
-      breathe,
     })
     this.outer = new PulseState({
       enabled: enabled && edge !== undefined,
@@ -367,7 +382,6 @@ class TabPulseRenderable extends Renderable {
       promptPulse: options.outerPromptPulse ?? options.promptPulse ?? 0,
       complete: options.outerComplete ?? options.complete ?? false,
       glow: outerGlow,
-      breathe: outerBreathe,
     })
     this._color = options.color ?? RGBA.defaultForeground()
     this._outerColor = options.outerColor ?? this._color
@@ -437,14 +451,6 @@ class TabPulseRenderable extends Renderable {
 
   set outerGlow(value: boolean) {
     if (this.outer.setGlow(value)) this.changed()
-  }
-
-  set breathe(value: boolean) {
-    if (this.inner.setBreathe(value)) this.changed()
-  }
-
-  set outerBreathe(value: boolean) {
-    if (this.outer.setBreathe(value)) this.changed()
   }
 
   private changed() {
@@ -539,7 +545,7 @@ class TabPulseRenderable extends Renderable {
   }
 
   protected override onUpdate(deltaTime: number): void {
-    if (!this._enabled) return
+    if (!this.live) return
     this.inner.advance(deltaTime)
     this.outer.advance(deltaTime)
     this.live = this.inner.live || this.outer.live
@@ -551,16 +557,20 @@ class TabPulseRenderable extends Renderable {
     const completion = this.inner.completion
     const flash = this.inner.flash
     const glowLevel = this.inner.glowLevel
+    const releaseLevel = this.inner.releaseLevel
     const outerRunning = this.outer.running
     const outerCompletion = this.outer.completion
     const outerFlash = this.outer.flash
     const outerGlowLevel = this.outer.glowLevel
+    const outerReleaseLevel = this.outer.releaseLevel
     if (
       glowLevel === 0 &&
+      releaseLevel === 0 &&
       running === 0 &&
       completion === 0 &&
       flash === 0 &&
       outerGlowLevel === 0 &&
+      outerReleaseLevel === 0 &&
       outerRunning === 0 &&
       outerCompletion === 0 &&
       outerFlash === 0
@@ -568,17 +578,19 @@ class TabPulseRenderable extends Renderable {
       this.emitLevel(0)
       return
     }
-    const [front, secondFront] = this.inner.fronts(this.width)
-    const [outerFront, outerSecondFront] = this.outer.fronts(this.width)
+    const fronts = running === 0 ? undefined : this.inner.fronts(this.width)
+    const outerFronts = outerRunning === 0 ? undefined : this.outer.fronts(this.width)
     if (this._onLevel)
       this.emitLevel(
         running === 0
           ? 0
-          : Math.max(intensityAt(1, front, RUN_HEAD, RUN_TAIL), intensityAt(1, secondFront, RUN_HEAD, RUN_TAIL)) *
+          : Math.max(intensityAt(1, fronts![0], RUN_HEAD, RUN_TAIL), intensityAt(1, fronts![1], RUN_HEAD, RUN_TAIL)) *
               running,
       )
     const glowTail = Math.min(this._glowTail, Math.max(1, this.width - 2))
     const outerGlowTail = Math.min(this._outerGlowTail, Math.max(1, this.width - 2))
+    const releaseSpread = glowReleaseSpread(this.inner.releaseProgress ?? 0, glowTail, this.width)
+    const outerReleaseSpread = glowReleaseSpread(this.outer.releaseProgress ?? 0, outerGlowTail, this.width)
     const flashTail = this._flashTail === undefined ? undefined : Math.min(this._flashTail, Math.max(1, this.width - 2))
     const outerFlashTail =
       this._outerFlashTail === undefined ? undefined : Math.min(this._outerFlashTail, Math.max(1, this.width - 2))
@@ -593,8 +605,8 @@ class TabPulseRenderable extends Renderable {
         running === 0
           ? 0
           : Math.max(
-              intensityAt(index, front, RUN_HEAD, RUN_TAIL),
-              intensityAt(index, secondFront, RUN_HEAD, RUN_TAIL),
+              intensityAt(index, fronts![0], RUN_HEAD, RUN_TAIL),
+              intensityAt(index, fronts![1], RUN_HEAD, RUN_TAIL),
             ) *
             0.14 *
             running
@@ -602,8 +614,8 @@ class TabPulseRenderable extends Renderable {
         outerRunning === 0
           ? 0
           : Math.max(
-              intensityAt(index, outerFront, RUN_HEAD, RUN_TAIL),
-              intensityAt(index, outerSecondFront, RUN_HEAD, RUN_TAIL),
+              intensityAt(index, outerFronts![0], RUN_HEAD, RUN_TAIL),
+              intensityAt(index, outerFronts![1], RUN_HEAD, RUN_TAIL),
             ) *
             0.14 *
             outerRunning
@@ -614,7 +626,10 @@ class TabPulseRenderable extends Renderable {
         this._color,
         this._flashColor,
         this._completionColor,
-        glowLevel === 0 ? 0 : glowIntensityAt(index, glowTail) * GLOW_OPACITY * glowLevel,
+        Math.max(
+          glowLevel === 0 ? 0 : glowIntensityAt(index, glowTail) * GLOW_OPACITY * glowLevel,
+          releaseLevel === 0 ? 0 : glowIntensityAt(index, releaseSpread) * GLOW_OPACITY * releaseLevel,
+        ),
         sweep,
         flashTail === undefined ? flash : flash * tabFlashIntensity(index, flashTail),
         completion,
@@ -630,7 +645,10 @@ class TabPulseRenderable extends Renderable {
         this._outerColor,
         this._outerFlashColor,
         this._outerCompletionColor,
-        outerGlowLevel === 0 ? 0 : glowIntensityAt(index, outerGlowTail) * GLOW_OPACITY * outerGlowLevel,
+        Math.max(
+          outerGlowLevel === 0 ? 0 : glowIntensityAt(index, outerGlowTail) * GLOW_OPACITY * outerGlowLevel,
+          outerReleaseLevel === 0 ? 0 : glowIntensityAt(index, outerReleaseSpread) * GLOW_OPACITY * outerReleaseLevel,
+        ),
         outerSweep,
         outerFlashTail === undefined ? outerFlash : outerFlash * tabFlashIntensity(index, outerFlashTail),
         outerCompletion,
@@ -667,8 +685,6 @@ export function TabPulse(props: {
   outerComplete?: boolean
   glow?: boolean
   outerGlow?: boolean
-  breathe?: boolean
-  outerBreathe?: boolean
   color: RGBA
   outerColor?: RGBA
   glowColor?: RGBA
@@ -700,8 +716,6 @@ export function TabPulse(props: {
       outerComplete={props.outerComplete ?? props.complete ?? false}
       glow={props.glow ?? false}
       outerGlow={props.outerGlow ?? props.glow ?? false}
-      breathe={props.breathe ?? false}
-      outerBreathe={props.outerBreathe ?? props.breathe ?? false}
       color={props.color}
       outerColor={props.outerColor ?? props.color}
       glowColor={props.glowColor ?? props.color}

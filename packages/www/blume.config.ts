@@ -19,11 +19,11 @@ export default defineConfig({
   github: {
     owner: "anomalyco",
     repo: "opencode",
-    branch: "dev",
+    branch: "v2",
     dir: "packages/www",
   },
   theme: {
-    background: "#131010",
+    background: { dark: "#131010" },
     fonts: {
       body: "ibm-plex-mono",
       display: "ibm-plex-mono",

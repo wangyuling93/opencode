@@ -1,8 +1,8 @@
 import type { Config, Path, Project, ProviderAuthResponse } from "@/types"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
-import { batch, createMemo, getOwner, onCleanup, untrack } from "solid-js"
-import { createStore, produce, reconcile } from "solid-js/store"
+import { batch, getOwner, onCleanup, untrack } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import type { InitError } from "../pages/error"
 import { type ServerEvent, type ServerSDK } from "./server-sdk"
@@ -32,12 +32,9 @@ import { createRefreshQueue } from "./global-sync/queue"
 import { directoryKey } from "./global-sync/utils"
 import { pathKey, PathKey } from "@/utils/path-key"
 import { createDirSyncContext } from "./directory-sync"
-import { createSimpleContext } from "@opencode-ai/ui/context"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 import { createRefCountMap } from "@/utils/refcount"
-import { useGlobal } from "./global"
-import { ServerConnection, useServer } from "./server"
-import { retry } from "@opencode-ai/core/util/retry"
+import { ServerConnection } from "./servers"
 import type { ServerScope } from "@/utils/server-scope"
 import { createHomeSessionIndexCache } from "./global-sync/home-session-index"
 import { persisted } from "@/utils/persist"
@@ -57,6 +54,18 @@ import { createServerSession, type ServerSession } from "./server-session"
 import { createCatalogSync } from "./server-sync/catalog"
 import { createConnectionSync } from "./server-sync/connection"
 import { usePlatform } from "./platform"
+import { useServer } from "./server"
+
+export function shouldRefreshWorkspaceSessions(event: ServerEvent) {
+  const type = event.current?.type ?? event.type
+  return (
+    type === "session.created" ||
+    type === "session.deleted" ||
+    type === "session.moved" ||
+    type === "session.renamed" ||
+    type === "session.forked"
+  )
+}
 
 type GlobalStore = {
   ready: boolean
@@ -185,7 +194,7 @@ export function reconcileActiveSessionStatuses(
 function makeQueryOptionsApi(scope: ServerScope, serverAPI: ServerApi) {
   return {
     globalConfig: () => loadGlobalConfigQuery(scope),
-    projects: () => loadProjectsQuery(scope, serverAPI.project),
+    projects: () => loadProjectsQuery(scope, serverAPI.project, serverAPI.worktree),
     providers: (directory: PathKey | null) => loadProvidersQuery(scope, directory, serverAPI),
     integrations: (directory: PathKey | null) => loadIntegrationsQuery(scope, directory, serverAPI.integration),
     path: (directory: PathKey | null) => loadPathQuery(scope, directory, serverAPI.location),
@@ -553,12 +562,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   }
   const toDirectoryEvent = (event: ServerEvent) => {
     if (event.current?.type === "session.created") return
-    if (
-      event.current?.type !== "session.renamed" &&
-      event.current?.type !== "session.moved" &&
-      event.current?.type !== "session.usage.updated"
-    )
-      return event
+    if (event.current?.type !== "session.renamed" && event.current?.type !== "session.usage.updated") return event
     const info = session.get(event.current.data.sessionID)
     if (info) return { type: "session.updated", properties: { info } }
     return event
@@ -576,6 +580,16 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     markSessionListChanged(event, directory, previousDirectory)
     if (event.current) session.applyV2(event.current)
     session.apply(event)
+    if (event.current?.type === "session.moved") {
+      const info = session.get(event.current.data.sessionID)
+      if (info) indexSession(info)
+    }
+    if (shouldRefreshWorkspaceSessions(event)) {
+      void queryClient.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === serverSDK.scope && query.queryKey[2] === "settings-workspace-sessions",
+      })
+    }
     if (event.current?.type === "session.created")
       void session
         .resolve(event.current.data.sessionID, { force: true })
@@ -624,20 +638,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         refresh: () => void bootstrap.refetch(),
         setGlobalProject: setProjects,
       })
-      if (
-        eventType === "config.updated" ||
-        eventType === "agent.updated" ||
-        eventType === "project.directories.updated"
-      )
+      if (eventType === "config.updated" || eventType === "agent.updated" || eventType === "worktree.updated")
         bootstrap.refetch()
       if (eventType === "global.disposed") Object.keys(children.children).filter(children.active).forEach(queue.push)
       return
     }
 
-    if (event.current?.type === "session.moved") {
-      const info = session.get(event.current.data.sessionID)
-      if (info) indexSession(info)
-    }
     if (event.current?.type === "session.forked")
       void session
         .resolve(event.current.data.sessionID, { force: true })
@@ -667,7 +673,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       void loadCommands(directory, serverSDK.api.command)
         .then((commands) => setStore("command", commands))
         .catch(() => {})
-    if (eventType === "project.directories.updated") void bootstrap.refetch()
+    if (eventType === "worktree.updated") void bootstrap.refetch()
     const projected = toDirectoryEvent(event)
     if (projected)
       applyDirectoryEvent({
@@ -804,24 +810,12 @@ export function createServerSyncContext(serverSDK: ServerSDK) {
 
 export type ServerSync = ReturnType<typeof createServerSyncContext>
 
-export const { use: useServerSync, provider: ServerSyncProvider } = createSimpleContext({
-  name: "ServerSync",
-  // Returns an accessor so the resolved server can change reactively without
-  // re-instantiating the subtree (mirrors useServerSDK).
-  init: (props: { server?: ServerConnection.Any }) => {
-    const global = useGlobal()
-    const language = useLanguage()
-    const server = useServer()
-
-    return createMemo<ServerSync>(() => {
-      const conn = props.server ?? server.current
-      if (!conn) throw new Error(language.t("error.serverSDK.noServerAvailable"))
-      return global.ensureServerCtx(conn).sync
-    })
-  },
-})
+export const useServerSync = () => {
+  const server = useServer()
+  return server.ctx.sync
+}
 
 export function useQueryOptions() {
   const sync = useServerSync()
-  return createMemo(() => sync().queryOptions)
+  return sync.queryOptions
 }
