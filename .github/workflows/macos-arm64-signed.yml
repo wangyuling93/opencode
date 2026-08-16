@@ -237,6 +237,9 @@ jobs:
       contents: read
     env:
       SIGNING_KEYCHAIN: build.keychain
+      # bun run build re-runs the `prebuild` lifecycle script. Keep this set
+      # for every desktop step so that path does not fall back to npm @beta.
+      OPENCODE_CLI_DIST: ${{ inputs.channel == 'beta' && format('{0}/packages/cli/dist', github.workspace) || '' }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
@@ -287,12 +290,7 @@ jobs:
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
-          OPENCODE_CLI_DIST: ${{ inputs.channel == 'beta' && format('{0}/packages/cli/dist', github.workspace) || '' }}
           RUST_TARGET: aarch64-apple-darwin
-
-      - name: Drop CLI build tree after embed
-        if: inputs.channel == 'beta'
-        run: rm -rf packages/cli/dist
 
       - name: Build desktop
         run: bun run build
@@ -301,6 +299,10 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
+
+      - name: Drop CLI build tree after embed
+        if: inputs.channel == 'beta'
+        run: rm -rf packages/cli/dist
 
       # Keep node_modules/dist (electron-builder needs them); only drop caches.
       - name: Free runner caches before packaging
