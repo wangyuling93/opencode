@@ -3964,7 +3964,7 @@
             }
           }
         },
-        "description": "Interrupt active execution owned by this OpenCode process. Idle interruption is a no-op. When continue=true, execution resumes if durable inbox work remains after interruption.",
+        "description": "Interrupt active execution owned by this OpenCode process. Idle interruption is a no-op. When continue=true, execution resumes pending steering input while queued work remains parked.",
         "summary": "Interrupt session execution"
       }
     },
@@ -17728,8 +17728,9 @@
           "name": {
             "type": "string"
           },
-          "disabled": {
-            "type": "boolean"
+          "activation": {
+            "type": "string",
+            "enum": ["auto", "enabled", "disabled"]
           },
           "package": {
             "type": "string"
@@ -17747,7 +17748,7 @@
             "type": "object"
           }
         },
-        "required": ["id", "name", "package"],
+        "required": ["id", "name", "activation", "package"],
         "additionalProperties": false
       },
       "ProviderNotFoundError": {

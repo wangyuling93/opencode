@@ -474,6 +474,17 @@ function webSearchProviderLabel(provider: unknown, i18n: ReturnType<typeof useI1
   return i18n.t("ui.tool.websearch")
 }
 
+function readToolPath(input: Record<string, unknown>) {
+  if (typeof input.path === "string") return input.path
+  if (typeof input.filePath === "string") return input.filePath
+}
+
+function skillToolName(input: Record<string, unknown>, metadata?: Record<string, unknown>) {
+  if (typeof metadata?.name === "string") return metadata.name
+  if (typeof input.id === "string") return input.id
+  if (typeof input.name === "string") return input.name
+}
+
 export function getToolInfo(
   tool: string,
   input: any = {},
@@ -481,12 +492,14 @@ export function getToolInfo(
 ): ToolInfo {
   const i18n = useI18n()
   switch (tool) {
-    case "read":
+    case "read": {
+      const path = readToolPath(input)
       return {
         icon: "glasses",
         title: i18n.t("ui.tool.read"),
-        subtitle: input.filePath ? getFilename(input.filePath) : undefined,
+        subtitle: path ? getFilename(path) : undefined,
       }
+    }
     case "list":
       return {
         icon: "bullet-list",
@@ -568,7 +581,7 @@ export function getToolInfo(
     case "skill":
       return {
         icon: "brain",
-        title: input.name || i18n.t("ui.tool.skill"),
+        title: skillToolName(input, metadata) || i18n.t("ui.tool.skill"),
       }
     default:
       return {
@@ -847,7 +860,7 @@ function contextToolDetail(part: ToolPart): string | undefined {
 function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
   const input = (part.state.input ?? {}) as Record<string, unknown>
   const path = typeof input.path === "string" ? input.path : "/"
-  const filePath = typeof input.filePath === "string" ? input.filePath : undefined
+  const filePath = readToolPath(input)
   const pattern = typeof input.pattern === "string" ? input.pattern : undefined
   const include = typeof input.include === "string" ? input.include : undefined
   const offset = typeof input.offset === "number" ? input.offset : undefined
@@ -1793,7 +1806,7 @@ ToolRegistry.register({
           icon="glasses"
           trigger={{
             title: i18n.t("ui.tool.read"),
-            subtitle: props.input.filePath ? getFilename(props.input.filePath) : "",
+            subtitle: getFilename(readToolPath(props.input) ?? ""),
             args,
           }}
         />
@@ -2624,7 +2637,7 @@ ToolRegistry.register({
   name: "skill",
   render(props) {
     const i18n = useI18n()
-    const title = createMemo(() => props.input.name || i18n.t("ui.tool.skill"))
+    const title = createMemo(() => skillToolName(props.input, props.metadata) || i18n.t("ui.tool.skill"))
     const running = createMemo(() => props.status === "pending" || props.status === "running")
 
     const titleContent = () => <TextShimmer text={title()} active={running()} />
