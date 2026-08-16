@@ -25,6 +25,13 @@
 #                           build_desktop=false)
 #              └── publish (optional; waits for both that run)
 #
+# Beta (v2) compile must match upstream publish.yml: Bun canary +
+# BUN_COMPILE_RELEASE=canary. Current v2 always passes compile.executablePath;
+# leaving that unset makes Bun 1.3.14 reject the build.
+# Desktop embeds that same-commit CLI via OPENCODE_CLI_DIST (v2 prebuild
+# otherwise downloads npm @beta, which is a stale tarball without bin/opencode2).
+# Desktop rebuilds the CLI so packaging stays parallel with the CLI DMG job.
+#
 # codesigning environment (secrets/vars):
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
 #            APPLE_APP_SPECIFIC_PASSWORD
@@ -145,8 +152,16 @@ jobs:
           apple-team-id: ${{ vars.APPLE_TEAM_ID }}
 
       - uses: ./.github/actions/setup-bun
+        if: inputs.channel != 'beta'
         with:
           install-flags: --os=darwin --cpu=arm64
+
+      # v2 setup-bun accepts bun-version; the prod (dev) action copy does not.
+      - uses: ./.github/actions/setup-bun
+        if: inputs.channel == 'beta'
+        with:
+          install-flags: --os=darwin --cpu=arm64
+          bun-version: canary
 
       - name: Build CLI (darwin-arm64)
         # prod ships the classic packages/opencode CLI; beta ships opencode2
@@ -155,6 +170,8 @@ jobs:
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
+          BUN_COMPILE_RELEASE: ${{ inputs.channel == 'beta' && 'canary' || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify CLI binary
         shell: bash
@@ -238,12 +255,31 @@ jobs:
           resolve-identity: "false"
 
       - uses: ./.github/actions/setup-bun
+        if: inputs.channel != 'beta'
         with:
           install-flags: --os=darwin --cpu=arm64
+
+      - uses: ./.github/actions/setup-bun
+        if: inputs.channel == 'beta'
+        with:
+          install-flags: --os=darwin --cpu=arm64
+          bun-version: canary
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
+
+      # Same-commit opencode2 for the app bundle. v2 prebuild only copies a
+      # local build when OPENCODE_CLI_DIST is set; otherwise it fetches npm
+      # @beta (bin/lildax, not bin/opencode2).
+      - name: Build embedded CLI
+        if: inputs.channel == 'beta'
+        run: bun ./packages/cli/script/build.ts --single
+        env:
+          OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
+          BUN_COMPILE_RELEASE: canary
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare desktop
         run: bun ./scripts/prepare.ts
@@ -251,7 +287,12 @@ jobs:
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
+          OPENCODE_CLI_DIST: ${{ inputs.channel == 'beta' && format('{0}/packages/cli/dist', github.workspace) || '' }}
           RUST_TARGET: aarch64-apple-darwin
+
+      - name: Drop CLI build tree after embed
+        if: inputs.channel == 'beta'
+        run: rm -rf packages/cli/dist
 
       - name: Build desktop
         run: bun run build
