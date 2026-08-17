@@ -177,12 +177,19 @@ async function compileExecutable(item: (typeof allTargets)[number]) {
 
   await mkdir(cache, { recursive: true })
   const archive = path.join(cache, `${name}.zip`)
-  const assets = await compileReleaseAssets(release)
-  const url = assets.get(`${name}.zip`)
-  if (!url) throw new Error(`Bun release ${release} does not include ${name}.zip`)
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
-  const response = await fetch(url, {
-    headers: { Accept: "application/octet-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  const assets = await compileReleaseAssets(release).catch((error) => {
+    console.warn(error)
+    return undefined
+  })
+  const url = assets?.get(`${name}.zip`)
+  if (assets && !url) throw new Error(`Bun release ${release} does not include ${name}.zip`)
+  const download = url ?? `https://github.com/oven-sh/bun/releases/download/${release}/${name}.zip`
+  const response = await fetch(download, {
+    headers: {
+      Accept: "application/octet-stream",
+      ...(url && token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   })
   if (!response.ok) throw new Error(`Failed to download ${name} from Bun release ${release}: ${response.status}`)
   await Bun.write(archive, response)
@@ -194,7 +201,15 @@ async function compileExecutable(item: (typeof allTargets)[number]) {
 function compileReleaseAssets(release: string) {
   const existing = releaseAssets.get(release)
   if (existing) return existing
-  const pending = fetch(`https://api.github.com/repos/oven-sh/bun/releases/tags/${release}?cache=${Date.now()}`)
+  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
+  // Actions runners share unauthenticated API quota and often get 403 without a token.
+  const pending = fetch(`https://api.github.com/repos/oven-sh/bun/releases/tags/${release}?cache=${Date.now()}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "opencode-cli-build",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
     .then(async (response) => {
       if (!response.ok) throw new Error(`Failed to resolve Bun release ${release}: ${response.status}`)
       const data: unknown = await response.json()
