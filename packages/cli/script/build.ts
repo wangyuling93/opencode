@@ -27,7 +27,6 @@ const requestedTarget = process.argv.find((arg) => arg.startsWith("--target="))?
 const skipInstall = process.argv.includes("--skip-install")
 const skipWebUi = process.argv.includes("--skip-web-ui")
 const solidPlugin = createSolidTransformPlugin()
-const releaseAssets = new Map<string, Promise<Map<string, string>>>()
 
 const allTargets: {
   os: string
@@ -160,11 +159,11 @@ for (const item of targets) {
 async function compileExecutable(item: (typeof allTargets)[number]) {
   const release = process.env.BUN_COMPILE_RELEASE
   if (!release) return
+  if (isCurrentCompileRuntime(item)) return process.execPath
 
-  const platform = item.os === "win32" ? "windows" : item.os
   const name = [
     "bun",
-    platform,
+    item.os === "win32" ? "windows" : item.os,
     item.arch === "arm64" ? "aarch64" : item.arch,
     item.abi,
     item.avx2 === false ? "baseline" : undefined,
@@ -177,20 +176,7 @@ async function compileExecutable(item: (typeof allTargets)[number]) {
 
   await mkdir(cache, { recursive: true })
   const archive = path.join(cache, `${name}.zip`)
-  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
-  const assets = await compileReleaseAssets(release).catch((error) => {
-    console.warn(error)
-    return undefined
-  })
-  const url = assets?.get(`${name}.zip`)
-  if (assets && !url) throw new Error(`Bun release ${release} does not include ${name}.zip`)
-  const download = url ?? `https://github.com/oven-sh/bun/releases/download/${release}/${name}.zip`
-  const response = await fetch(download, {
-    headers: {
-      Accept: "application/octet-stream",
-      ...(url && token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  })
+  const response = await fetch(`https://github.com/oven-sh/bun/releases/download/${release}/${name}.zip`)
   if (!response.ok) throw new Error(`Failed to download ${name} from Bun release ${release}: ${response.status}`)
   await Bun.write(archive, response)
   await $`unzip -oq ${archive} -d ${cache}`
@@ -198,44 +184,13 @@ async function compileExecutable(item: (typeof allTargets)[number]) {
   return executable
 }
 
-function compileReleaseAssets(release: string) {
-  const existing = releaseAssets.get(release)
-  if (existing) return existing
-  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
-  // Actions runners share unauthenticated API quota and often get 403 without a token.
-  const pending = fetch(`https://api.github.com/repos/oven-sh/bun/releases/tags/${release}?cache=${Date.now()}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "opencode-cli-build",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  })
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`Failed to resolve Bun release ${release}: ${response.status}`)
-      const data: unknown = await response.json()
-      if (typeof data !== "object" || data === null || !("assets" in data) || !Array.isArray(data.assets)) {
-        throw new Error(`Bun release ${release} returned invalid metadata`)
-      }
-      return new Map(
-        data.assets
-          .filter(
-            (asset): asset is { name: string; url: string } =>
-              typeof asset === "object" &&
-              asset !== null &&
-              "name" in asset &&
-              typeof asset.name === "string" &&
-              "url" in asset &&
-              typeof asset.url === "string",
-          )
-          .map((asset) => [asset.name, asset.url]),
-      )
-    })
-    .catch((error) => {
-      releaseAssets.delete(release)
-      throw error
-    })
-  releaseAssets.set(release, pending)
-  return pending
+function isCurrentCompileRuntime(item: (typeof allTargets)[number]) {
+  // x64 has avx2 vs baseline builds; CI x64 runners install baseline, so never
+  // embed process.execPath as the default x64 target.
+  if (item.arch !== "arm64" || process.arch !== "arm64") return false
+  if (item.os !== process.platform) return false
+  if (item.abi) return false
+  return true
 }
 
 function targetName(item: (typeof allTargets)[number]) {
