@@ -6,7 +6,17 @@ import { collectFiles } from "./files"
 export async function buildAppArchive(channel: string, options?: { skipBuild?: boolean }) {
   if (options?.skipBuild) return compress({})
   const root = path.resolve(import.meta.dirname, "../../app")
-  await $`bun run build`.cwd(root).env({ ...process.env, OPENCODE_CHANNEL: channel })
+  const nodeOptions = process.env.NODE_OPTIONS ?? ""
+  await $`bun run build -- --sourcemap false`.cwd(root).env({
+    ...process.env,
+    OPENCODE_CHANNEL: channel,
+    // Production Vite of packages/app now transforms ~4.5k modules (Mermaid).
+    // Default Node heap (~2GB) OOMs while rendering chunks; the archive
+    // already drops .map files, so skip generating them.
+    NODE_OPTIONS: /--max-old-space-size=/.test(nodeOptions)
+      ? nodeOptions
+      : [nodeOptions, "--max-old-space-size=8192"].filter(Boolean).join(" "),
+  })
   const assets = Object.fromEntries(
     await Promise.all(
       (await collectFiles(path.join(root, "dist")))
