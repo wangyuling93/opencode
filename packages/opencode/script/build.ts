@@ -18,6 +18,7 @@ import pkg from "../package.json"
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
+const requestedTarget = process.argv.find((arg) => arg.startsWith("--target="))?.slice("--target=".length)
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
@@ -113,26 +114,30 @@ const allTargets: {
   },
 ]
 
-const targets = singleFlag
-  ? allTargets.filter((item) => {
-      if (item.os !== process.platform || item.arch !== process.arch) {
-        return false
-      }
+const targets =
+  requestedTarget !== undefined
+    ? allTargets.filter((item) => targetName(item) === requestedTarget)
+    : singleFlag
+      ? allTargets.filter((item) => {
+          if (item.os !== process.platform || item.arch !== process.arch) {
+            return false
+          }
 
-      // When building for the current platform, prefer a single native binary by default.
-      // Baseline binaries require additional Bun artifacts and can be flaky to download.
-      if (item.avx2 === false) {
-        return baselineFlag
-      }
+          // When building for the current platform, prefer a single native binary by default.
+          // Baseline binaries require additional Bun artifacts and can be flaky to download.
+          if (item.avx2 === false) {
+            return baselineFlag
+          }
 
-      // also skip abi-specific builds for the same reason
-      if (item.abi !== undefined) {
-        return false
-      }
+          // also skip abi-specific builds for the same reason
+          if (item.abi !== undefined) {
+            return false
+          }
 
-      return true
-    })
-  : allTargets
+          return true
+        })
+      : allTargets
+if (requestedTarget !== undefined && !targets.length) throw new Error(`Unknown build target: ${requestedTarget}`)
 
 await $`rm -rf dist`
 
@@ -143,16 +148,7 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
 }
 for (const item of targets) {
-  const name = [
-    pkg.name,
-    // changing to win32 flags npm for some reason
-    item.os === "win32" ? "windows" : item.os,
-    item.arch,
-    item.avx2 === false ? "baseline" : undefined,
-    item.abi === undefined ? undefined : item.abi,
-  ]
-    .filter(Boolean)
-    .join("-")
+  const name = targetName(item)
   console.log(`building ${name}`)
   await $`mkdir -p dist/${name}/bin`
 
@@ -241,6 +237,19 @@ if (Script.release) {
     }
   }
   await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+}
+
+function targetName(item: (typeof allTargets)[number]) {
+  return [
+    pkg.name,
+    // changing to win32 flags npm for some reason
+    item.os === "win32" ? "windows" : item.os,
+    item.arch,
+    item.avx2 === false ? "baseline" : undefined,
+    item.abi === undefined ? undefined : item.abi,
+  ]
+    .filter(Boolean)
+    .join("-")
 }
 
 export { binaries }

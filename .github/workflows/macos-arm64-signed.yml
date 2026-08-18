@@ -16,21 +16,21 @@
 # and publish pin their checkout to it so a moving branch ref cannot shift
 # the build away from the commit the tag/notes are bound to.
 #
-# Internal graph (parallel after resolve; free minutes on public repos favor
-# wall-clock over serializing on one runner):
+# Internal graph (match upstream publish.yml: Vite + bun compile on Linux,
+# macOS only signs and packages — Darwin ARM Vite OOMs at Node's default heap):
 #
 #   resolve-version
-#     ├── package-cli      (build + sign + notarize CLI DMG)
-#     └── package-desktop  (build + sign + notarize desktop DMG; skipped when
-#                           build_desktop=false)
-#              └── publish (optional; waits for both that run)
+#     └── build-cli         (Linux: Vite + compile darwin-arm64)
+#           ├── package-cli      (macOS: sign + notarize CLI DMG)
+#           └── package-desktop  (macOS: embed downloaded CLI, sign desktop;
+#                                 skipped when build_desktop=false)
+#                    └── publish (optional; waits for both that run)
 #
 # Beta (v2) compile must match upstream publish.yml: Bun canary +
 # BUN_COMPILE_RELEASE=canary. Current v2 always passes compile.executablePath;
 # leaving that unset makes Bun 1.3.14 reject the build.
 # Desktop embeds that same-commit CLI via OPENCODE_CLI_DIST (v2 prebuild
 # otherwise downloads npm @beta, which is a stale tarball without bin/opencode2).
-# Desktop rebuilds the CLI so packaging stays parallel with the CLI DMG job.
 #
 # codesigning environment (secrets/vars):
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
@@ -124,8 +124,74 @@ jobs:
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
-  package-cli:
+  build-cli:
     needs: resolve-version
+    if: github.repository != 'anomalyco/opencode'
+    name: Build CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      # GitHub-hosted Linux is 7GB; 4GB leaves room for Bun. Do not use 8GB here.
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+        with:
+          ref: ${{ needs.resolve-version.outputs.built_sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bun
+        if: inputs.channel != 'beta'
+
+      # v2 setup-bun accepts bun-version; the prod (dev) action copy does not.
+      - uses: ./.github/actions/setup-bun
+        if: inputs.channel == 'beta'
+        with:
+          bun-version: canary
+
+      - name: Build darwin-arm64 CLI
+        # Cross-compile from Linux like upstream publish.yml. --single would
+        # emit a linux binary; --target selects the macOS artifact we sign.
+        run: ${{ inputs.channel == 'beta' && 'bun ./packages/cli/script/build.ts --target=opencode2-darwin-arm64' || './packages/opencode/script/build.ts --target=opencode-darwin-arm64' }}
+        env:
+          OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
+          BUN_COMPILE_RELEASE: ${{ inputs.channel == 'beta' && 'canary' || '' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check CLI artifact
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          if [[ "${CHANNEL}" == "beta" ]]; then
+            binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
+            dist_dir="packages/cli/dist/cli-darwin-arm64"
+          else
+            binary="packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
+            dist_dir="packages/opencode/dist/opencode-darwin-arm64"
+          fi
+          if [[ ! -f "$binary" ]]; then
+            echo "Missing CLI binary: $binary" >&2
+            ls -lahR "$(dirname "$dist_dir")" || true
+            exit 1
+          fi
+          file "$binary"
+
+      - name: Upload unsigned CLI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-arm64-unsigned-cli
+          path: ${{ inputs.channel == 'beta' && 'packages/cli/dist/cli-darwin-arm64' || 'packages/opencode/dist/opencode-darwin-arm64' }}
+          if-no-files-found: error
+          retention-days: 7
+
+  package-cli:
+    needs:
+      - resolve-version
+      - build-cli
     name: CLI DMG
     runs-on: macos-26
     timeout-minutes: 120
@@ -135,8 +201,6 @@ jobs:
       contents: read
     env:
       SIGNING_KEYCHAIN: build.keychain
-      # packages/app Vite (Mermaid + sourcemaps) exceeds Node's default ~2GB heap.
-      NODE_OPTIONS: --max-old-space-size=8192
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
@@ -153,27 +217,11 @@ jobs:
           apple-id: ${{ vars.APPLE_ID }}
           apple-team-id: ${{ vars.APPLE_TEAM_ID }}
 
-      - uses: ./.github/actions/setup-bun
-        if: inputs.channel != 'beta'
+      - name: Download unsigned CLI
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          install-flags: --os=darwin --cpu=arm64
-
-      # v2 setup-bun accepts bun-version; the prod (dev) action copy does not.
-      - uses: ./.github/actions/setup-bun
-        if: inputs.channel == 'beta'
-        with:
-          install-flags: --os=darwin --cpu=arm64
-          bun-version: canary
-
-      - name: Build CLI (darwin-arm64)
-        # prod ships the classic packages/opencode CLI; beta ships opencode2
-        # from packages/cli on the v2 branch.
-        run: ${{ inputs.channel == 'beta' && 'bun ./packages/cli/script/build.ts --single' || './packages/opencode/script/build.ts --single' }}
-        env:
-          OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
-          BUN_COMPILE_RELEASE: ${{ inputs.channel == 'beta' && 'canary' || '' }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: macos-arm64-unsigned-cli
+          path: ${{ inputs.channel == 'beta' && 'packages/cli/dist/cli-darwin-arm64' || 'packages/opencode/dist/opencode-darwin-arm64' }}
 
       - name: Verify CLI binary
         shell: bash
@@ -228,7 +276,9 @@ jobs:
           retention-days: 14
 
   package-desktop:
-    needs: resolve-version
+    needs:
+      - resolve-version
+      - build-cli
     if: github.repository != 'anomalyco/opencode' && inputs.build_desktop
     name: Desktop DMG
     runs-on: macos-26
@@ -276,17 +326,15 @@ jobs:
         with:
           node-version: "24"
 
-      # Same-commit opencode2 for the app bundle. v2 prebuild only copies a
+      # Same-commit opencode2 from the Linux build. v2 prebuild only copies a
       # local build when OPENCODE_CLI_DIST is set; otherwise it fetches npm
       # @beta (bin/lildax, not bin/opencode2).
-      - name: Build embedded CLI
+      - name: Download unsigned CLI
         if: inputs.channel == 'beta'
-        run: bun ./packages/cli/script/build.ts --single
-        env:
-          OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
-          BUN_COMPILE_RELEASE: canary
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-arm64-unsigned-cli
+          path: packages/cli/dist/cli-darwin-arm64
 
       - name: Prepare desktop
         run: bun ./scripts/prepare.ts
