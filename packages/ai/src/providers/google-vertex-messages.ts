@@ -4,7 +4,6 @@ import { AnthropicMessages } from "../protocols/anthropic-messages.js"
 import { Auth } from "../route/auth.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
-import { Framing } from "../route/framing.js"
 import { Protocol } from "../route/protocol.js"
 import { ProviderID, type ModelID } from "../schema/index.js"
 import { GoogleVertexShared } from "./google-vertex-shared.js"
@@ -57,7 +56,7 @@ const route = Route.make({
   }),
   endpoint: Endpoint.path(({ request }) => `/${request.model.id}:streamRawPredict`),
   auth: Auth.none,
-  framing: Framing.sse,
+  framing: AnthropicMessages.framing,
 })
 
 export const routes = [route]
@@ -110,7 +109,6 @@ export const model: ProviderPackage.Definition<Settings, AnthropicMessages.Provi
     baseURL: settings.baseURL,
     headers: settings.headers === undefined ? undefined : { ...settings.headers },
     http: settings.body === undefined ? undefined : { body: { ...settings.body } },
-    limits: settings.limits,
     location: settings.location,
     project: settings.project,
     providerOptions: settings.providerOptions,

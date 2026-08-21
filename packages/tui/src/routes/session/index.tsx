@@ -121,7 +121,14 @@ const TRANSCRIPT_BACKFILL_CHUNK = 60
 type PendingAction = "steer" | "queue" | "cancel"
 
 const context = createContext<{
+  /** Content width: terminal width minus vertical tabs, sidebar, and padding. */
   width: number
+  /**
+   * Shared reactive terminal size. Transcript-row components must read this
+   * instead of calling useTerminalDimensions(), which registers one renderer
+   * resize listener per mounted component and grows with transcript length.
+   */
+  terminal: { width: number; height: number }
   sessionID: string
   thinkingMode: () => ThinkingMode
   showThinking: () => boolean
@@ -276,6 +283,9 @@ export function Session(props: { verticalTabsWidth: number }) {
   const sessionTabs = useSessionTabs()
   const [awayFromBottom, setAwayFromBottom] = createSignal(false)
   const [latestHovered, setLatestHovered] = createSignal(false)
+  createEffect(() => {
+    if (!awayFromBottom()) setLatestHovered(false)
+  })
 
   const clearMessageNavigation = () => {
     setNavigationSlack(0)
@@ -1122,11 +1132,24 @@ export function Session(props: { verticalTabsWidth: number }) {
     ),
   )
 
+  // Memoized per axis so width readers do not re-run on height-only resizes
+  // (dimensions() is one object signal with identity equality) and vice versa.
+  const terminalWidth = createMemo(() => dimensions().width)
+  const terminalHeight = createMemo(() => dimensions().height)
+
   return (
     <context.Provider
       value={{
         get width() {
           return contentWidth()
+        },
+        terminal: {
+          get width() {
+            return terminalWidth()
+          },
+          get height() {
+            return terminalHeight()
+          },
         },
         sessionID: route.sessionID,
         thinkingMode,
@@ -1197,16 +1220,15 @@ export function Session(props: { verticalTabsWidth: number }) {
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
               <Show when={awayFromBottom()}>
                 <box
+                  id="session-jump-to-latest"
                   paddingLeft={1}
-                  paddingRight={1}
-                  backgroundColor={
-                    latestHovered() ? theme.background.action.primary.focused : theme.background.action.primary.default
-                  }
                   onMouseOver={() => setLatestHovered(true)}
                   onMouseOut={() => setLatestHovered(false)}
                   onMouseUp={toBottom}
                 >
-                  <text fg={latestHovered() ? theme.text.action.primary.focused : theme.text.action.primary.default}>
+                  <text
+                    fg={latestHovered() ? theme.text.action.secondary.hovered : theme.text.action.secondary.default}
+                  >
                     Jump to latest ↓
                   </text>
                 </box>
@@ -1804,7 +1826,6 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
   const ctx = use()
   const data = useData()
   const local = useLocal()
-  const dimensions = useTerminalDimensions()
   const theme = useTheme("elevated")
   const model = createMemo(
     () =>
@@ -1828,10 +1849,10 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
           <span style={{ fg: props.message.error ? theme.text.subdued : local.agent.color(props.message.agent) }}>
             {Locale.titlecase(props.message.agent)}
           </span>
-          <Show when={dimensions().width >= 28}>
+          <Show when={ctx.terminal.width >= 28}>
             <span style={{ fg: theme.text.subdued }}> · {model()}</span>
           </Show>
-          <Show when={duration() && (dimensions().width < 28 || dimensions().width >= 36)}>
+          <Show when={duration() && (ctx.terminal.width < 28 || ctx.terminal.width >= 36)}>
             <span style={{ fg: theme.text.subdued }}> · {Locale.duration(duration())}</span>
           </Show>
           <Show when={interrupted()}>
@@ -2520,9 +2541,8 @@ function ToolImages(props: { parts: readonly SessionMessageAssistantTool[] }) {
 function SessionImages(props: { images: readonly { uri: string }[]; paddingLeft?: number }) {
   const ctx = use()
   const dialog = useDialog()
-  const dimensions = useTerminalDimensions()
   const images = createMemo(() => (ctx.config.session?.image_preview ? props.images : []))
-  const height = createMemo(() => Math.max(4, Math.min(8, Math.floor(dimensions().height / 4))))
+  const height = createMemo(() => Math.max(4, Math.min(8, Math.floor(ctx.terminal.height / 4))))
   const visible = createMemo(() => images().slice(0, 3))
 
   return (

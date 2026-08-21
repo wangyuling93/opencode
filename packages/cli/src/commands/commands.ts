@@ -1,6 +1,5 @@
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, Flag } from "effect/unstable/cli"
 import { Spec } from "../framework/spec"
-import { GlobalFlags } from "./global-flags"
 
 declare const OPENCODE_CLI_NAME: string | undefined
 
@@ -160,7 +159,29 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
     }),
     Spec.make("plugin", {
       description: "Manage plugins",
-      commands: [Spec.make("list", { description: "List active plugins" })],
+      commands: [
+        Spec.make("list", {
+          description: "List plugins",
+          params: {
+            builtin: Flag.boolean("builtin").pipe(
+              Flag.withDescription("Include built-in server plugins"),
+              Flag.withDefault(false),
+            ),
+          },
+        }),
+        Spec.make("add", {
+          description: "Install a plugin and add it to the global configuration",
+          params: {
+            package: Argument.string("package").pipe(Argument.withDescription("npm registry package specifier")),
+          },
+        }),
+        Spec.make("remove", {
+          description: "Remove a plugin from global configuration",
+          params: {
+            package: Argument.string("package").pipe(Argument.withDescription("configured package specifier")),
+          },
+        }),
+      ],
     }),
     Spec.make("models", {
       description: "List all available models",
@@ -275,15 +296,36 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         Spec.make("stop", { description: "Stop the background server" }),
         Spec.make("get", {
           description: "Get service configuration",
-          params: { key: Argument.string("key").pipe(Argument.optional) },
+          params: {
+            key: Argument.string("key").pipe(Argument.withDescription("Service setting or env"), Argument.optional),
+            name: Argument.string("name").pipe(
+              Argument.withDescription("Environment variable name"),
+              Argument.optional,
+            ),
+          },
         }),
         Spec.make("set", {
           description: "Set service configuration",
-          params: { key: Argument.string("key"), value: Argument.string("value") },
+          params: {
+            key: Argument.string("key").pipe(Argument.withDescription("Service setting or env")),
+            value: Argument.string("value").pipe(
+              Argument.withDescription("Setting value or environment variable name"),
+            ),
+            nestedValue: Argument.string("env-value").pipe(
+              Argument.withDescription("Environment variable value"),
+              Argument.optional,
+            ),
+          },
         }),
         Spec.make("unset", {
           description: "Unset service configuration",
-          params: { key: Argument.string("key") },
+          params: {
+            key: Argument.string("key").pipe(Argument.withDescription("Service setting or env")),
+            name: Argument.string("name").pipe(
+              Argument.withDescription("Environment variable name"),
+              Argument.optional,
+            ),
+          },
         }),
       ],
     }),
@@ -300,4 +342,4 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
   ],
 })
 
-export const Commands = { ...Root, spec: Root.spec.pipe(Command.withGlobalFlags(GlobalFlags.all)) }
+export const Commands = Root
