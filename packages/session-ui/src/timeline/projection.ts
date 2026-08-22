@@ -312,7 +312,7 @@ export function reuseTimelineRows(previous: TimelineRow.TimelineRow[] | undefine
   const contextByPart = new Map<string, PriorContext>()
   previous.forEach((row, index) => {
     if (row._tag !== "AssistantPart" || row.group.type !== "context") return
-    row.group.refs.forEach((ref) => contextByPart.set(`${row.userMessageID}:${ref.partID}`, { index, row }))
+    row.group.refs.forEach((ref) => contextByPart.set(contextPartKey(row.userMessageID, ref), { index, row }))
   })
   const reserved = new Map<string, number>()
   rows.forEach((row, index) => {
@@ -407,7 +407,7 @@ function stabilizeContextKey(
 ) {
   if (row._tag !== "AssistantPart" || row.group.type !== "context") return row
   const existing = row.group.refs.reduce<PriorContext | undefined>((result, ref) => {
-    const candidate = contextByPart.get(`${row.userMessageID}:${ref.partID}`)
+    const candidate = contextByPart.get(contextPartKey(row.userMessageID, ref))
     if (!candidate) return result
     const key = TimelineRow.key(candidate.row)
     if (claimed.has(key)) return result
@@ -426,6 +426,10 @@ function stabilizeContextKey(
   })
 }
 
+function contextPartKey(userMessageID: string, ref: PartRef) {
+  return `${userMessageID}:${ref.messageID}:${ref.partID}`
+}
+
 function renderable(content: Content, showReasoning: boolean) {
   if (content.type === "text") return !!content.text.trim()
   if (content.type === "reasoning") return showReasoning && !!content.text.trim()
@@ -440,12 +444,12 @@ function groupContent(items: { messageID: string; partID: string; content: Conte
   const flush = () => {
     const first = context[0]
     if (!first) return
-    groups.push({ type: "context", key: `context:${first.partID}`, refs: context })
+    groups.push({ type: "context", key: `context:${first.messageID}:${first.partID}`, refs: context })
     context = []
   }
 
   items.forEach((item) => {
-    if (item.content.type === "tool" && contextTools.has(item.content.name)) {
+    if (item.content.type === "tool" && contextTools.has(item.content.name) && !hasLoadedFiles(item.content)) {
       context.push({ messageID: item.messageID, partID: item.partID })
       return
     }
@@ -458,6 +462,12 @@ function groupContent(items: { messageID: string; partID: string; content: Conte
   })
   flush()
   return groups
+}
+
+function hasLoadedFiles(content: Extract<Content, { type: "tool" }>) {
+  if (content.name !== "read" || content.state.status !== "completed") return false
+  const loaded = content.state.metadata?.loaded
+  return Array.isArray(loaded) && loaded.some((path) => typeof path === "string")
 }
 
 function reasoningHeading(text: string): string | undefined {
