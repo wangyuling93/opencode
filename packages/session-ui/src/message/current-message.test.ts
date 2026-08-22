@@ -26,10 +26,26 @@ describe("current content default open", () => {
   test("uses the file-change disclosure preference", () => {
     expect(currentContentDefaultOpen(tool("edit"), false, true)).toBe(true)
     expect(currentContentDefaultOpen(tool("write"), false, false)).toBe(false)
-    expect(currentContentDefaultOpen(tool("patch"), false, true)).toBe(true)
+    expect(currentContentDefaultOpen(tool("patch"), false, false)).toBe(true)
   })
 
-  test("keeps deletion-only changes collapsed", () => {
+  test("collapses failed patches", () => {
+    const patch: SessionMessageAssistantTool = {
+      type: "tool",
+      id: "tool_patch",
+      name: "patch",
+      state: {
+        status: "error",
+        input: {},
+        error: { type: "ToolError", message: "Verification failed" },
+        metadata: {},
+      },
+      time: { created: 1, completed: 2 },
+    }
+    expect(currentContentDefaultOpen(patch, false, false)).toBe(false)
+  })
+
+  test("opens deletion-only patches", () => {
     expect(
       currentContentDefaultOpen(
         tool("patch", [
@@ -39,6 +55,6 @@ describe("current content default open", () => {
         false,
         true,
       ),
-    ).toBe(false)
+    ).toBe(true)
   })
 })

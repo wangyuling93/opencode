@@ -8,12 +8,14 @@ import { Card } from "@opencode-ai/ui/card"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
+import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import type { SessionUserActions, SessionUserComment } from "../actions"
 import {
   MessageDivider,
   SessionAssistantContent,
   SessionContextToolGroup,
+  SessionFileToolGroup,
   SessionShellMessage,
   SessionUserMessage,
   currentContentDefaultOpen,
@@ -97,6 +99,41 @@ export function createSessionTimelineRowRenderer(input: {
       )
     }
 
+    if (row().group.type === "file") {
+      const tools = createMemo(() => {
+        const group = row().group
+        if (group.type !== "file") return []
+        return group.refs.flatMap((ref) => {
+          const message = input.projection.messageByID().get(ref.messageID)
+          const content = Timeline.resolveContent(message, ref.partID)
+          return message?.type === "assistant" && content?.type === "tool" ? [content] : []
+        })
+      })
+      const firstPath = createMemo(() => {
+        const tool = tools()[0]
+        if (!tool || !("metadata" in tool.state)) return undefined
+        const files = tool.state.metadata?.files
+        if (!Array.isArray(files)) return undefined
+        const file = files[0]
+        return file && typeof file === "object" && "file" in file && typeof file.file === "string"
+          ? file.file
+          : undefined
+      })
+      return (
+        <SessionFileToolGroup
+          tools={tools()}
+          fileOpen={(path) => {
+            const open = input.disclosure.value(`${row().group.key}:file:${path}`)
+            if (open !== undefined) return open
+            if (tools()[0]?.name !== "edit" || path !== firstPath()) return false
+            return input.disclosure.value(row().group.key) ?? input.editToolDefaultOpen()
+          }}
+          onFileOpenChange={(path, open) => input.disclosure.set(`${row().group.key}:file:${path}`, open)}
+          onSizeChange={onSizeChange}
+        />
+      )
+    }
+
     const ref = createMemo(() => {
       const group = row().group
       return group.type === "part" ? group.ref : undefined
@@ -149,13 +186,15 @@ export function createSessionTimelineRowRenderer(input: {
         label: i18n.t("ui.sessionTimeline.notice.model"),
         data: `${message.model.providerID}/${message.model.id}`,
       }
-    if (message.type === "location-switched")
-      return { label: i18n.t("ui.patch.action.moved"), data: message.location.directory }
     if (message.type === "skill") return { label: i18n.t("ui.tool.skill"), data: message.name }
     if (message.type === "system") {
       const prefix = "Instructions updated: "
       if (message.description?.startsWith(prefix)) {
-        const keys = message.description.slice(prefix.length).split(",").map((s) => s.trim()).filter(Boolean)
+        const keys = message.description
+          .slice(prefix.length)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
         return {
           label: i18n.t("ui.sessionTimeline.notice.instructionsUpdated"),
           items: keys,
@@ -274,56 +313,89 @@ export function createSessionTimelineRowRenderer(input: {
         if (value._tag !== "Notice") throw new Error("Expected a notice timeline row")
         return value
       }
+      const message = createMemo(() => input.projection.messageByID().get(current().messageID))
+      const moved = createMemo(() => {
+        const value = message()
+        return value?.type === "location-switched" ? value : undefined
+      })
       const content = createMemo(() => {
-        const message = input.projection.messageByID().get(current().messageID)
-        return message ? notice(message) : undefined
+        const value = message()
+        return value ? notice(value) : undefined
       })
       return (
         <Frame row={current()}>
-          <Show when={content()}>
-            {(content) => (
-              <Show
-                when={content().items?.length}
-                fallback={
-                  <div
-                    data-slot="session-timeline-notice"
-                    class={`w-full pt-3 pb-1 text-13-regular text-text-weak ${padding()}`}
+          <Show
+            when={moved()}
+            fallback={
+              <Show when={content()}>
+                {(content) => (
+                  <Show
+                    when={content().items?.length}
+                    fallback={
+                      <div
+                        data-slot="session-timeline-notice"
+                        class={`w-full pt-3 pb-1 text-13-regular text-text-weak ${padding()}`}
+                      >
+                        <bdi dir="auto" class="text-13-medium">
+                          {content().label}
+                        </bdi>
+                        <Show when={content().data}>
+                          {(data) => (
+                            <span>
+                              {" "}
+                              · <bdi dir="auto">{data()}</bdi>
+                            </span>
+                          )}
+                        </Show>
+                      </div>
+                    }
                   >
-                    <bdi dir="auto" class="text-13-medium">
-                      {content().label}
-                    </bdi>
-                    <Show when={content().data}>
-                      {(data) => (
-                        <span>
-                          {" "}
-                          · <bdi dir="auto">{data()}</bdi>
-                        </span>
-                      )}
-                    </Show>
-                  </div>
-                }
-              >
-                <div data-slot="session-timeline-notice" class={`w-full py-1 ${padding()}`}>
-                  <div class="flex min-h-5 min-w-0 items-center gap-2 overflow-hidden">
-                    <bdi
-                      dir="auto"
-                      class="shrink-0 text-[13px] font-[530] leading-none tracking-[-0.04px] text-v2-text-text-faint"
-                    >
-                      {content().label}
-                    </bdi>
-                    <For each={content().items}>
-                      {(item) => (
+                    <div data-slot="session-timeline-notice" class={`w-full py-1 ${padding()}`}>
+                      <div class="flex min-h-5 min-w-0 items-center gap-2 overflow-hidden">
                         <bdi
                           dir="auto"
-                          class="min-w-0 truncate text-[13px] font-[440] leading-none tracking-[-0.04px] text-v2-text-text-faint"
+                          class="shrink-0 text-[13px] font-[530] leading-none tracking-[-0.04px] text-v2-text-text-faint"
                         >
-                          {item}
+                          {content().label}
                         </bdi>
-                      )}
-                    </For>
-                  </div>
-                </div>
+                        <For each={content().items}>
+                          {(item) => (
+                            <bdi
+                              dir="auto"
+                              class="min-w-0 truncate text-[13px] font-[440] leading-none tracking-[-0.04px] text-v2-text-text-faint"
+                            >
+                              {item}
+                            </bdi>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
+                )}
               </Show>
+            }
+          >
+            {(message) => (
+              <div
+                data-slot="session-timeline-notice"
+                data-type="location-switched"
+                class={`flex h-7 w-full min-w-0 items-center gap-2 py-1 text-[13px] leading-none tracking-[-0.04px] text-v2-text-text-faint ${padding()}`}
+              >
+                <Tooltip
+                  appearance="compact"
+                  placement="top"
+                  value={i18n.t("ui.sessionTimeline.notice.movedTooltip")}
+                  class="shrink-0"
+                  triggerTabIndex={0}
+                >
+                  <bdi data-slot="session-timeline-notice-label" dir="auto" class="font-[530]">
+                    {i18n.t("ui.sessionTimeline.notice.movedTo")}
+                  </bdi>
+                </Tooltip>{" "}
+                <bdi data-slot="session-timeline-notice-value" dir="ltr" class="min-w-0 truncate font-[440]">
+                  {message().location.directory}
+                </bdi>
+              </div>
             )}
           </Show>
         </Frame>

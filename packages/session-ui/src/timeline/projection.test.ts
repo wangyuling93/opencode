@@ -2,17 +2,24 @@ import { describe, expect, test } from "bun:test"
 import type { ModelRef, SessionMessageInfo } from "@opencode-ai/client/promise"
 import { createTimelineProjection, reuseTimelineRows, TimelineRow, type PartGroup } from "./projection"
 
-const context = (
-  key: string,
-  partIDs: string[],
-  identity: { userMessageID?: string; messageID?: string } = {},
-) =>
+const context = (key: string, partIDs: string[], identity: { userMessageID?: string; messageID?: string } = {}) =>
   new TimelineRow.AssistantPart({
     userMessageID: identity.userMessageID ?? "user-1",
     group: {
       key,
       type: "context",
       refs: partIDs.map((partID) => ({ messageID: identity.messageID ?? "assistant-1", partID })),
+    } satisfies PartGroup,
+    previousAssistantPart: false,
+  })
+
+const patch = (key: string, partIDs: string[], userMessageID = "user-1") =>
+  new TimelineRow.AssistantPart({
+    userMessageID,
+    group: {
+      key,
+      type: "file",
+      refs: partIDs.map((partID) => ({ messageID: "assistant-1", partID })),
     } satisfies PartGroup,
     previousAssistantPart: false,
   })
@@ -34,6 +41,13 @@ describe("reuseTimelineRows", () => {
       previous: [context("context:a", ["a"])],
       rows: [context("context:a", ["a", "b"])],
       expected: ["assistant-part:user-1:context:a"],
+      reused: [],
+    },
+    {
+      name: "preserves a patch group key when a member is appended",
+      previous: [patch("patch:a", ["a"])],
+      rows: [patch("patch:a", ["a", "b"])],
+      expected: ["assistant-part:user-1:patch:a"],
       reused: [],
     },
     {

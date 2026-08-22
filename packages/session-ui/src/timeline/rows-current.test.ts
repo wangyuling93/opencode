@@ -166,6 +166,38 @@ describe("current session timeline rows", () => {
     ])
   })
 
+  test("suppresses thinking while a subagent is delegating or running", () => {
+    const statuses = ["streaming", "running"] as const
+    statuses.forEach((status) => {
+      const source = [
+        { id: "msg_user", type: "user", text: "delegate", time: { created: 1 } },
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { id: "model", providerID: "provider" },
+          content: [
+            {
+              type: "tool",
+              id: "tool_subagent",
+              name: "subagent",
+              state:
+                status === "streaming"
+                  ? { status, input: "" }
+                  : { status, input: { description: "Inspect code" }, metadata: {} },
+              time: { created: 2 },
+            },
+          ],
+          time: { created: 2 },
+        },
+      ] satisfies SessionMessageInfo[]
+
+      expect(Timeline.constructSessionMessageRows(source, false, { type: "busy" }).rows.map((row) => row._tag)).toEqual(
+        ["UserMessage", "AssistantPart"],
+      )
+    })
+  })
+
   test("renders retry state from the current assistant message", () => {
     const source = [
       { id: "msg_user", type: "user", text: "retry", time: { created: 1 } },
@@ -181,6 +213,35 @@ describe("current session timeline rows", () => {
     ] satisfies SessionMessageInfo[]
 
     const result = Timeline.constructSessionMessageRows(source, true, { type: "busy" })
+
+    expect(result.rows.map((row) => row._tag)).toEqual(["UserMessage", "Retry"])
+  })
+
+  test("does not render the retry error twice", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "retry", time: { created: 1 } },
+      {
+        id: "msg_assistant",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [],
+        error: { type: "ProviderError", message: "The provider response ended unexpectedly." },
+        retry: {
+          attempt: 2,
+          at: 10,
+          error: { type: "ProviderError", message: "The provider response ended unexpectedly." },
+        },
+        time: { created: 2 },
+      },
+    ] satisfies SessionMessageInfo[]
+
+    const result = Timeline.constructSessionMessageRows(source, true, {
+      type: "retry",
+      attempt: 2,
+      next: 10,
+      message: "The provider response ended unexpectedly.",
+    })
 
     expect(result.rows.map((row) => row._tag)).toEqual(["UserMessage", "Retry"])
   })
@@ -356,6 +417,110 @@ describe("current session timeline rows", () => {
       "assistant-part:msg_user:context:msg_assistant_1:tool_0",
       "assistant-part:msg_user:part:msg_assistant_2:tool_0",
       "assistant-part:msg_user:context:msg_assistant_3:tool_0",
+    ])
+  })
+
+  test("groups adjacent successful patches and leaves failed patches separate", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "edit", time: { created: 1 } },
+      {
+        id: "msg_assistant",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [
+          {
+            type: "tool",
+            id: "tool_patch_1",
+            name: "patch",
+            state: {
+              status: "completed",
+              input: {},
+              content: [{ type: "text", text: "done" }],
+              metadata: { files: [] },
+            },
+            time: { created: 2, completed: 3 },
+          },
+          {
+            type: "tool",
+            id: "tool_patch_2",
+            name: "patch",
+            state: { status: "running", input: {}, metadata: { files: [] } },
+            time: { created: 4 },
+          },
+          {
+            type: "tool",
+            id: "tool_patch_failed",
+            name: "patch",
+            state: {
+              status: "error",
+              input: {},
+              error: { type: "ToolError", message: "failed" },
+              metadata: { files: [] },
+            },
+            time: { created: 5, completed: 6 },
+          },
+          {
+            type: "tool",
+            id: "tool_patch_3",
+            name: "patch",
+            state: {
+              status: "completed",
+              input: {},
+              content: [{ type: "text", text: "done" }],
+              metadata: { files: [] },
+            },
+            time: { created: 7, completed: 8 },
+          },
+          {
+            type: "tool",
+            id: "tool_edit_1",
+            name: "edit",
+            state: { status: "running", input: {}, metadata: { files: [] } },
+            time: { created: 9 },
+          },
+          {
+            type: "tool",
+            id: "tool_edit_2",
+            name: "edit",
+            state: { status: "running", input: {}, metadata: { files: [] } },
+            time: { created: 10 },
+          },
+        ],
+        time: { created: 2, completed: 8 },
+      },
+    ] satisfies SessionMessageInfo[]
+
+    const result = Timeline.constructSessionMessageRows(source, false, { type: "idle" })
+    const groups = result.rows.flatMap((row) => (row._tag === "AssistantPart" ? [row.group] : []))
+
+    expect(groups).toEqual([
+      {
+        type: "file",
+        key: "part:msg_assistant:tool_patch_1",
+        refs: [
+          { messageID: "msg_assistant", partID: "tool_patch_1" },
+          { messageID: "msg_assistant", partID: "tool_patch_2" },
+        ],
+      },
+      {
+        type: "part",
+        key: "part:msg_assistant:tool_patch_failed",
+        ref: { messageID: "msg_assistant", partID: "tool_patch_failed" },
+      },
+      {
+        type: "file",
+        key: "part:msg_assistant:tool_patch_3",
+        refs: [{ messageID: "msg_assistant", partID: "tool_patch_3" }],
+      },
+      {
+        type: "file",
+        key: "part:msg_assistant:tool_edit_1",
+        refs: [
+          { messageID: "msg_assistant", partID: "tool_edit_1" },
+          { messageID: "msg_assistant", partID: "tool_edit_2" },
+        ],
+      },
     ])
   })
 
