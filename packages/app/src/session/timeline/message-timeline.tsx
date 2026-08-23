@@ -54,7 +54,7 @@ export function BackgroundMoveHint(props: { keybind?: string[] }) {
   return (
     <div
       data-component="session-background-hint"
-      class="flex h-6 max-w-full items-center justify-center gap-[3px] overflow-hidden text-[13px] font-[530] leading-5 tracking-[-0.04px] text-v2-text-text-muted"
+      class="flex h-6 max-w-full items-center justify-center gap-[3px] overflow-hidden text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-muted"
       aria-label={language.t("session.background.moveInline", { keybind: keybind() })}
     >
       <span data-slot="session-background-hint-prefix" class="shrink-0">
@@ -108,7 +108,7 @@ export function BackgroundWorkSummary(props: { tasks: BackgroundTask[] }) {
             {(task) => (
               <div
                 data-component="session-background-list-item"
-                class="flex h-7 min-w-0 items-center gap-2 rounded-[4px] px-3 text-[13px] font-[440] leading-none tracking-[-0.04px]"
+                class="flex h-7 min-w-0 items-center gap-2 rounded-[4px] px-3 text-[13px] font-[440] leading-text-compact tracking-[-0.04px]"
               >
                 <span class="shrink-0 text-v2-text-text-base">{taskType(task)}</span>
                 <span class="min-w-0 flex-1 truncate text-v2-text-text-faint">{task.label}</span>

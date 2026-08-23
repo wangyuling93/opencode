@@ -42,8 +42,12 @@ const OpenResponsesInputImage = Schema.Struct({
 const OpenResponsesInputFile = Schema.Struct({
   type: Schema.tag("input_file"),
   filename: Schema.String,
-  file_data: Schema.String,
-  mime_type: Schema.optional(Schema.String),
+  file_data: Schema.optional(Schema.String),
+  file_url: Schema.optional(Schema.String),
+})
+const OpenResponsesInputVideo = Schema.Struct({
+  type: Schema.tag("input_video"),
+  video_url: Schema.String,
 })
 const MediaInput = Schema.Union([OpenResponsesInputImage, OpenResponsesInputFile])
 export type MediaInput = Schema.Schema.Type<typeof MediaInput>
@@ -54,8 +58,13 @@ const OpenResponsesOutputText = Schema.Struct({
   text: Schema.String,
 })
 
-export const MessagePhase = Schema.Literals(["commentary", "final_answer"])
+export const MessagePhase = Schema.NullOr(Schema.Literals(["commentary", "final_answer"]))
 type MessagePhase = Schema.Schema.Type<typeof MessagePhase>
+
+const messagePhase = (value: unknown): MessagePhase | undefined => {
+  if (value === null || value === "commentary" || value === "final_answer") return value
+  return undefined
+}
 
 const OpenResponsesReasoningSummaryText = Schema.Struct({
   type: Schema.tag("summary_text"),
@@ -81,6 +90,7 @@ const OpenResponsesFunctionCallOutputContent = Schema.Union([
   OpenResponsesInputText,
   OpenResponsesInputImage,
   OpenResponsesInputFile,
+  OpenResponsesInputVideo,
 ])
 
 const OpenResponsesFunctionCallOutput = Schema.Union([
@@ -237,6 +247,7 @@ const OpenResponsesErrorPayload = Schema.Struct({
   message: optionalNull(Schema.String),
   param: optionalNull(Schema.String),
 })
+type OpenResponsesErrorPayload = Schema.Schema.Type<typeof OpenResponsesErrorPayload>
 
 const WebSocketErrorHeader = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
 export const WebSocketErrorEvent = Schema.StructWithRest(
@@ -301,20 +312,6 @@ export const Event = Schema.StructWithRest(
 )
 export type Event = Schema.Schema.Type<typeof Event>
 
-const RefusalEvent = Schema.Union([
-  Schema.Struct({
-    type: Schema.tag("response.refusal.delta"),
-    item_id: Schema.String,
-    delta: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.tag("response.refusal.done"),
-    item_id: Schema.String,
-    refusal: Schema.String,
-  }),
-])
-const isRefusalEvent = Schema.is(RefusalEvent)
-
 export interface Extension {
   readonly id: string
   readonly name: string
@@ -323,7 +320,6 @@ export interface Extension {
     readonly media: ProviderShared.NormalizedMedia
     readonly request: LLMRequest
   }) => MediaInput | undefined
-  readonly messagePhase?: (value: unknown) => MessagePhase | null | undefined
 }
 
 const BASE: Extension = { id: ADAPTER, name: NAME }
@@ -336,7 +332,6 @@ export interface ParserState {
   readonly hasFunctionCall: boolean
   readonly lifecycle: Lifecycle.State
   readonly messageItems: ReadonlySet<string>
-  readonly messagePhase: (value: unknown) => MessagePhase | null | undefined
   readonly messagePhases: Readonly<Record<string, MessagePhase | null>>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
   readonly store: boolean | undefined
@@ -414,26 +409,29 @@ const lowerReasoning = (part: ReasoningPart, providerMetadataKey: string): OpenR
   }
 }
 
-const hostedToolItemID = (part: ToolResultPart, providerMetadataKey: string) => {
-  return itemID(part.providerMetadata, providerMetadataKey)
-}
-
 const lowerMedia = Effect.fn("OpenResponses.lowerMedia")(function* (
   part: MediaPart,
   request: LLMRequest,
   extension: Extension,
+  target: "message" | "tool-result",
 ) {
   const media = ProviderShared.normalizeMedia(part)
   const extended = extension.lowerMedia?.({ part, media, request })
   if (extended) return extended
+  const url =
+    typeof part.data === "string" && (part.data.startsWith("https://") || part.data.startsWith("http://"))
+      ? part.data
+      : undefined
   if (!media.mime.startsWith("image/")) {
+    if (target === "tool-result" && media.mime.startsWith("video/"))
+      return { type: "input_video" as const, video_url: url ?? media.dataUrl }
     return {
       type: "input_file" as const,
       filename: part.filename ?? (media.mime === "application/pdf" ? "document.pdf" : "file"),
-      file_data: media.dataUrl,
+      ...(url ? { file_url: url } : { file_data: media.base64 }),
     }
   }
-  return { type: "input_image" as const, image_url: media.dataUrl }
+  return { type: "input_image" as const, image_url: url ?? media.dataUrl }
 })
 
 const lowerUserContent = Effect.fnUntraced(function* (
@@ -442,8 +440,15 @@ const lowerUserContent = Effect.fnUntraced(function* (
   extension: Extension,
 ) {
   if (part.type === "text") return { type: "input_text" as const, text: part.text }
-  if (part.type === "media") return yield* lowerMedia(part, request, extension)
+  if (part.type === "media") return yield* lowerMessageMedia(part, request, extension)
   return yield* ProviderShared.unsupportedContent(extension.name, "user", ["text", "media"])
+})
+
+const lowerMessageMedia = Effect.fnUntraced(function* (part: MediaPart, request: LLMRequest, extension: Extension) {
+  const lowered = yield* lowerMedia(part, request, extension, "message")
+  if (lowered.type === "input_video")
+    return yield* ProviderShared.invalidRequest(`${extension.name} user messages do not support input_video`)
+  return lowered
 })
 
 // Tool results may carry structured text, images, and files. Keep media as provider-native
@@ -455,6 +460,20 @@ const lowerToolResultContentItem = Effect.fnUntraced(function* (
 ) {
   if (item.type === "text") return { type: "input_text" as const, text: item.text }
   return yield* lowerMedia(
+    { type: "media", mediaType: item.mime, data: item.uri, filename: item.name },
+    request,
+    extension,
+    "tool-result",
+  )
+})
+
+const lowerHostedToolResultContentItem = Effect.fnUntraced(function* (
+  item: Content,
+  request: LLMRequest,
+  extension: Extension,
+) {
+  if (item.type === "text") return { type: "input_text" as const, text: item.text }
+  return yield* lowerMessageMedia(
     { type: "media", mediaType: item.mime, data: item.uri, filename: item.name },
     request,
     extension,
@@ -510,7 +529,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
         >((groups, part) => {
           const metadata = part.providerMetadata?.[providerMetadataKey]
           const id = itemID(part.providerMetadata, providerMetadataKey)
-          const phase = ProviderShared.isRecord(metadata) ? messagePhase(metadata.phase, extension) : undefined
+          const phase = ProviderShared.isRecord(metadata) ? messagePhase(metadata.phase) : undefined
           const group = groups.at(-1)
           if (group && group.id === id && group.phase === phase) group.parts.push(part)
           else groups.push({ id, phase, parts: [part] })
@@ -560,17 +579,19 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
         }
         if (part.type === "tool-result" && part.providerExecuted === true) {
           flushText()
-          const itemID = hostedToolItemID(part, providerMetadataKey)
-          if (store !== false && itemID && !hostedToolReferences.has(itemID))
-            input.push({ type: "item_reference", id: itemID })
+          const id = itemID(part.providerMetadata, providerMetadataKey)
+          if (store !== false && id && !hostedToolReferences.has(id))
+            input.push({ type: "item_reference", id })
           if (store === false && part.result.type === "content") {
             const content: ReadonlyArray<Content> = part.result.value
             input.push({
               role: "user",
-              content: yield* Effect.forEach(content, (item) => lowerToolResultContentItem(item, request, extension)),
+              content: yield* Effect.forEach(content, (item) =>
+                lowerHostedToolResultContentItem(item, request, extension),
+              ),
             })
           }
-          if (itemID) hostedToolReferences.add(itemID)
+          if (id) hostedToolReferences.add(id)
           continue
         }
         return yield* ProviderShared.unsupportedContent(extension.name, "assistant", [
@@ -782,18 +803,17 @@ const reasoningMetadata = (state: ParserState, item: StreamItem & { id: string }
 // best-effort, not guaranteed.
 const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
   const item = event.item
-  if (item?.type === "message" && item.id)
+  if (item?.type === "message" && item.id) {
+    const phase = messagePhase(item.phase)
     return [
       {
         ...state,
         messageItems: new Set([...state.messageItems, item.id]),
-        messagePhases: (() => {
-          const phase = state.messagePhase(item.phase)
-          return phase === undefined ? state.messagePhases : { ...state.messagePhases, [item.id]: phase }
-        })(),
+        messagePhases: phase === undefined ? state.messagePhases : { ...state.messagePhases, [item.id]: phase },
       },
       NO_EVENTS,
     ]
+  }
   if (item && isReasoningItem(item)) {
     const events: LLMEvent[] = []
     return [
@@ -951,7 +971,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   if (!item) return [state, NO_EVENTS] satisfies StepResult
 
   if (item.type === "message" && item.id) {
-    const itemPhase = state.messagePhase(item.phase)
+    const itemPhase = messagePhase(item.phase)
     const phase = itemPhase === undefined ? state.messagePhases[item.id] : itemPhase
     const events: LLMEvent[] = []
     const messageItems = new Set(state.messageItems)
@@ -1059,22 +1079,26 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
   return [{ ...state, lifecycle, hasFunctionCall, tools: pending.tools }, events] satisfies StepResult
 })
 
-// Build a single human-readable message from whatever the provider supplied.
+// Build the prettiest summary available from whatever the provider supplied.
 // When both code and message are present, prefix the code so consumers see
 // the failure mode (e.g. `rate_limit_exceeded: Slow down`) instead of just
 // the bare message — production rate limits and context-length failures used
-// to be indistinguishable from generic stream drops.
-const providerErrorMessage = (event: Event, fallback: string): string => {
-  const nested = event.error ?? event.response?.error ?? undefined
+// to be indistinguishable from generic stream drops. Returns undefined when
+// the payload carries no usable summary.
+const providerErrorMessage = (event: Event, nested: OpenResponsesErrorPayload | undefined): string | undefined => {
   const message = event.message || nested?.message || undefined
   const code = event.code || nested?.code || undefined
   if (message && code) return `${code}: ${message}`
-  return message || code || fallback
+  return message || code
 }
 
 export const providerFailure = (id: string, event: Event, fallback: string) => {
-  const code = event.code || event.error?.code || event.response?.error?.code || undefined
-  const message = providerErrorMessage(event, fallback)
+  const nested = event.error ?? event.response?.error ?? undefined
+  const code = event.code || nested?.code || undefined
+  // Keep the full raw payload on the error even when the message is a summary.
+  const body = JSON.stringify(nested ?? event) ?? ""
+  const summary = providerErrorMessage(event, nested)
+  const message = summary ?? (body === "{}" ? fallback : body)
   const status =
     typeof event.status === "number"
       ? event.status
@@ -1084,7 +1108,8 @@ export const providerFailure = (id: string, event: Event, fallback: string) => {
   return new AIError({
     module: id,
     method: "stream",
-    reason: classifyProviderFailure({ message, code, status }),
+    body,
+    reason: classifyProviderFailure({ message, code, status, rawBody: body }),
   })
 }
 
@@ -1100,20 +1125,17 @@ export const step = (state: ParserState, event: Event) => {
     )
   }
   if (event.type === "response.refusal.delta" || event.type === "response.refusal.done") {
-    if (!isRefusalEvent(event)) return ProviderShared.eventError(state.id, `${event.type} is malformed`)
+    const value = event.type === "response.refusal.delta" ? event.delta : event.refusal
+    if (!event.item_id || typeof value !== "string") return ProviderShared.eventError(state.id, `${event.type} is malformed`)
     return Effect.succeed(
       event.type === "response.refusal.delta"
         ? onOutputTextDelta(state, event, event.item_id)
-        : onOutputTextDone(state, { ...event, text: event.refusal }, event.item_id),
+        : onOutputTextDone(state, { ...event, text: value }, event.item_id),
     )
   }
   if (event.type === "response.reasoning.delta" || event.type === "response.reasoning_summary_text.delta") {
     if (!event.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
     return Effect.succeed(onReasoningDelta(state, event, event.item_id))
-  }
-  if (event.type === "response.reasoning.done" || event.type === "response.reasoning_summary_text.done") {
-    if (!event.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
-    return Effect.succeed(onReasoningDone(state, event))
   }
   if (event.type === "response.reasoning_summary_part.added")
     return event.item_id
@@ -1159,16 +1181,10 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   tools: ToolStream.empty<string>(),
   lifecycle: Lifecycle.initial(),
   messageItems: new Set<string>(),
-  messagePhase: (value) => messagePhase(value, extension),
   messagePhases: {},
   reasoningItems: {},
   store: OpenResponsesOptions.resolve(request).store,
 })
-
-const messagePhase = (value: unknown, extension: Extension): MessagePhase | null | undefined => {
-  if (value === "commentary" || value === "final_answer") return value
-  return extension.messagePhase?.(value)
-}
 
 export const protocol = Protocol.make({
   id: ADAPTER,

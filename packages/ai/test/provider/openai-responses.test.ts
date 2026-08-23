@@ -28,7 +28,7 @@ import * as Azure from "../../src/providers/azure.js"
 import * as OpenAI from "../../src/providers/openai.js"
 import * as XAI from "../../src/providers/xai.js"
 import * as OpenAIResponses from "../../src/protocols/openai-responses.js"
-import { OpenAIResponsesChannel } from "../../src/protocols/openai-responses-channel.js"
+import { OpenResponsesContinuation } from "../../src/protocols/open-responses-continuation.js"
 import * as ProviderShared from "../../src/protocols/shared.js"
 import { continuationRequest, nativeOpenAIResponsesContinuation } from "../continuation-scenarios.js"
 import { it } from "../lib/effect.js"
@@ -68,7 +68,7 @@ const baseChannelDriver = (message: string): WebSocketChannelDriver => ({
 
 const continuationDriver = (request: Readonly<Record<string, unknown>>) => {
   const message = ProviderShared.encodeJson(request)
-  return OpenAIResponsesChannel.driver({
+  return OpenResponsesContinuation.driver({
     id: "openai-responses",
     name: "OpenAI Responses",
     request,
@@ -1273,7 +1273,7 @@ describe("OpenAI Responses route", () => {
         {
           type: "input_file",
           filename: "report.pdf",
-          file_data: "data:application/pdf;base64,JVBERi0xLjQ=",
+          file_data: "JVBERi0xLjQ=",
         },
       ])
     }),
@@ -1300,12 +1300,12 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(expectToolOutput(prepared.body).output).toEqual([
-        { type: "input_file", filename: "report.pdf", file_data: dataUrl },
+        { type: "input_file", filename: "report.pdf", file_data: base64 },
       ])
     }),
   )
 
-  it.effect("uses xAI inline file encoding for PDF tool results", () =>
+  it.effect("uses standard inline file encoding for xAI PDF tool results", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
@@ -1334,7 +1334,6 @@ describe("OpenAI Responses route", () => {
           type: "input_file",
           filename: "report.pdf",
           file_data: "JVBERi0xLjQ=",
-          mime_type: "application/pdf",
         },
       ])
     }),
@@ -1359,7 +1358,61 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(expectToolOutput(prepared.body).output).toEqual([
-        { type: "input_file", filename: "file", file_data: "data:audio/mpeg;base64,AAECAw==" },
+        { type: "input_file", filename: "file", file_data: "AAECAw==" },
+      ])
+    }),
+  )
+
+  it.effect("lowers remote tool-result media URLs without base64 wrapping", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model,
+          messages: [
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "fetch", input: {} })]),
+            Message.tool({
+              id: "call_1",
+              name: "fetch",
+              resultType: "content",
+              result: [
+                { type: "file", uri: "https://example.com/image.png", mime: "image/png" },
+                { type: "file", uri: "https://example.com/report.pdf", mime: "application/pdf", name: "report.pdf" },
+              ],
+            }),
+          ],
+        }),
+      )
+
+      expect(expectToolOutput(prepared.body).output).toEqual([
+        { type: "input_image", image_url: "https://example.com/image.png" },
+        { type: "input_file", filename: "report.pdf", file_url: "https://example.com/report.pdf" },
+      ])
+    }),
+  )
+
+  it.effect("lowers tool-result videos as input_video", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model,
+          messages: [
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "record", input: {} })]),
+            Message.tool({
+              id: "call_1",
+              name: "record",
+              resultType: "content",
+              result: [
+                { type: "file", uri: "data:video/mp4;base64,AAECAw==", mime: "video/mp4" },
+                { type: "file", uri: "https://example.com/demo.mp4", mime: "video/mp4" },
+              ],
+            }),
+          ],
+        }),
+      )
+
+      expect(expectToolOutput(prepared.body).output).toEqual([
+        { type: "input_video", video_url: "data:video/mp4;base64,AAECAw==" },
+        { type: "input_video", video_url: "https://example.com/demo.mp4" },
       ])
     }),
   )
@@ -2712,7 +2765,7 @@ describe("OpenAI Responses route", () => {
             {
               type: "input_file",
               filename: "report.pdf",
-              file_data: "data:application/pdf;base64,JVBERi0xLjQ=",
+              file_data: "JVBERi0xLjQ=",
             },
           ],
         },
@@ -2720,7 +2773,7 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("uses xAI inline file encoding for user PDFs", () =>
+  it.effect("uses standard inline file encoding for xAI user PDFs", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
@@ -2744,7 +2797,6 @@ describe("OpenAI Responses route", () => {
               type: "input_file",
               filename: "report.pdf",
               file_data: "JVBERi0xLjQ=",
-              mime_type: "application/pdf",
             },
           ],
         },
@@ -2769,8 +2821,39 @@ describe("OpenAI Responses route", () => {
             {
               type: "input_file",
               filename: "file",
-              file_data: "data:application/x-tar;base64,AAECAw==",
+              file_data: "AAECAw==",
             },
+          ],
+        },
+      ])
+    }),
+  )
+
+  it.effect("lowers remote user media URLs without base64 wrapping", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model,
+          messages: [
+            Message.user([
+              { type: "media", mediaType: "image/png", data: "https://example.com/image.png" },
+              {
+                type: "media",
+                mediaType: "application/pdf",
+                data: "https://example.com/report.pdf",
+                filename: "report.pdf",
+              },
+            ]),
+          ],
+        }),
+      )
+
+      expect(prepared.body.input).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "input_image", image_url: "https://example.com/image.png" },
+            { type: "input_file", filename: "report.pdf", file_url: "https://example.com/report.pdf" },
           ],
         },
       ])
@@ -2933,36 +3016,42 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("falls back to a stable default when error is null", () =>
+  it.effect("falls back to the raw payload when error is null", () =>
     Effect.gen(function* () {
       const error = yield* LLMClient.generate(request).pipe(
         Effect.provide(fixedResponse(sseEvents({ type: "error", error: null }))),
         Effect.flip,
       )
 
-      expect(error.reason).toMatchObject({ _tag: "UnknownProvider", message: "OpenAI Responses stream error" })
+      expect(error.reason).toMatchObject({ _tag: "UnknownProvider" })
+      expect(error.reason.message).toContain('"error":null')
+      expect(error.body).toBe(error.reason.message)
     }),
   )
 
-  it.effect("falls back to a stable default when both error and response are absent", () =>
+  it.effect("falls back to the raw payload when both error and response are absent", () =>
     Effect.gen(function* () {
       const error = yield* LLMClient.generate(request).pipe(
         Effect.provide(fixedResponse(sseEvents({ type: "error" }))),
         Effect.flip,
       )
 
-      expect(error.reason).toMatchObject({ _tag: "UnknownProvider", message: "OpenAI Responses stream error" })
+      expect(error.reason).toMatchObject({ _tag: "UnknownProvider" })
+      expect(error.reason.message).toContain('"type":"error"')
+      expect(error.body).toBe(error.reason.message)
     }),
   )
 
-  it.effect("falls back to a stable default when response.failed has no error payload", () =>
+  it.effect("keeps the raw response payload when response.failed has no error payload", () =>
     Effect.gen(function* () {
       const error = yield* LLMClient.generate(request).pipe(
         Effect.provide(fixedResponse(sseEvents({ type: "response.failed", response: { id: "resp_failed_3" } }))),
         Effect.flip,
       )
 
-      expect(error.reason).toMatchObject({ _tag: "UnknownProvider", message: "OpenAI Responses response failed" })
+      expect(error.reason).toMatchObject({ _tag: "UnknownProvider" })
+      expect(error.reason.message).toContain('"resp_failed_3"')
+      expect(error.body).toBe(error.reason.message)
     }),
   )
 

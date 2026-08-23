@@ -488,6 +488,7 @@ function App(props: { pair?: DialogPairCredentials }) {
     if (route.data.type !== "session") return
     const session = data.session.get(route.data.sessionID)
     if (!session) return
+    if (data.session.creating(session.id)) return
     if (session.location.workspaceID !== undefined || terminalEnvironment.variables === undefined) return
     void client.api.session
       .environment({ sessionID: session.id, variables: terminalEnvironment.variables })
