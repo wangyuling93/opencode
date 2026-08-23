@@ -11,6 +11,7 @@ import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import type { SessionUserActions, SessionUserComment } from "../actions"
+import { BasicTool } from "../components/basic-tool"
 import {
   MessageDivider,
   SessionAssistantContent,
@@ -20,8 +21,9 @@ import {
   SessionUserMessage,
   currentContentDefaultOpen,
 } from "../message/current-message"
+import { SessionCompactionMessage } from "../message/message-content"
 import { SessionRetry } from "../components/session-retry"
-import { createReactiveTimelineProjection, Timeline, TimelineRow } from "./projection"
+import { createReactiveTimelineProjection, Timeline, TimelineRow, unwrapErrorMessage } from "./projection"
 
 const emptyAssistantMessages: SessionMessageAssistant[] = []
 type Projection = ReturnType<typeof createReactiveTimelineProjection>
@@ -54,7 +56,7 @@ export function createSessionTimelineRowRenderer(input: {
     input.status().type !== "idle" && input.projection.activeMessageID() === messageID
   const duration = (messageID: string) => {
     const user = input.projection.messageByID().get(messageID)
-    if (user?.type !== "user") return undefined
+    if (user?.type !== "user") return null
     const completed = (input.projection.assistantMessagesByParent().get(messageID) ?? emptyAssistantMessages).reduce<
       number | undefined
     >((latest, message) => {
@@ -202,7 +204,6 @@ export function createSessionTimelineRowRenderer(input: {
       }
       return { label: message.description ?? message.text }
     }
-    if (message.type === "compaction") return { label: i18n.t("ui.messagePart.compaction"), data: message.status }
     if (message.type !== "synthetic") return undefined
     if (message.description === "Continuing after restart") return { label: message.description }
     const source = typeof message.metadata?.source === "string" ? message.metadata.source : undefined
@@ -314,6 +315,15 @@ export function createSessionTimelineRowRenderer(input: {
         return value
       }
       const message = createMemo(() => input.projection.messageByID().get(current().messageID))
+      const compaction = createMemo(() => {
+        const value = message()
+        return value?.type === "compaction" ? value : undefined
+      })
+      const compactionError = createMemo(() => {
+        const value = compaction()
+        if (value?.status !== "failed") return ""
+        return unwrapErrorMessage(value.error.message)
+      })
       const moved = createMemo(() => {
         const value = message()
         return value?.type === "location-switched" ? value : undefined
@@ -324,6 +334,15 @@ export function createSessionTimelineRowRenderer(input: {
       })
       return (
         <Frame row={current()}>
+          <Show when={compaction()}>
+            {(message) => (
+              <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
+                <div data-slot="session-turn-compaction">
+                  <SessionCompactionMessage message={message()} error={compactionError()} />
+                </div>
+              </div>
+            )}
+          </Show>
           <Show
             when={moved()}
             fallback={
@@ -442,16 +461,35 @@ export function createSessionTimelineRowRenderer(input: {
       return (
         <Frame row={current()}>
           <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
-            <div data-slot="session-turn-thinking">
-              <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
-              <Show when={!input.showReasoningSummaries()}>
-                <TextReveal
-                  text={current().reasoningHeading}
-                  class="session-turn-thinking-heading"
-                  travel={25}
-                  duration={700}
-                />
-              </Show>
+            <div data-slot="session-turn-thinking-row">
+              <BasicTool
+                icon="mcp"
+                status="running"
+                compact
+                locked
+                hideDetails
+                trigger={
+                  <div data-slot="session-turn-thinking">
+                    <div data-slot="basic-tool-tool-info-structured">
+                      <div data-slot="basic-tool-tool-info-main">
+                        <span data-slot="basic-tool-tool-title">
+                          <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
+                        </span>
+                        <Show when={!input.showReasoningSummaries()}>
+                          <span data-slot="basic-tool-tool-subtitle">
+                            <TextReveal
+                              text={current().reasoningHeading}
+                              class="session-turn-thinking-heading"
+                              travel={25}
+                              duration={700}
+                            />
+                          </span>
+                        </Show>
+                      </div>
+                    </div>
+                  </div>
+                }
+              />
             </div>
           </div>
         </Frame>

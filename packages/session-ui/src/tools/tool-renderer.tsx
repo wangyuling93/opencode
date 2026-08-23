@@ -487,45 +487,42 @@ export function CurrentContextToolGroup(props: {
   }
 
   return (
-    <Collapsible
-      open={props.open}
-      onOpenChange={change}
-      variant="ghost"
-      class="tool-collapsible"
-      data-timeline-part-ids={props.tools.map((tool) => tool.id).join(",")}
-    >
-      <Collapsible.Trigger>
-        <div data-component="context-tool-group-trigger">
-          <span
-            data-slot="context-tool-group-title"
-            class="min-w-0 flex items-center gap-2 text-14-medium text-text-strong"
-          >
-            <span data-slot="context-tool-group-label" class="shrink-0">
-              <ToolStatusTitle
-                active={pending()}
-                activeText={i18n.t("ui.sessionTurn.status.gatheringContext")}
-                doneText={i18n.t("ui.sessionTurn.status.gatheredContext")}
-                split={false}
-              />
+    <div data-timeline-part-ids={props.tools.map((tool) => tool.id).join(",")}>
+      <BasicTool
+        icon="glasses"
+        status={pending() ? "running" : "completed"}
+        compact
+        allowOpenWhilePending
+        open={props.open}
+        onOpenChange={change}
+        trigger={
+          <div data-component="context-tool-group-trigger">
+            <span data-slot="context-tool-group-title" class="min-w-0 flex items-center gap-2">
+              <span data-slot="basic-tool-tool-title" class="shrink-0">
+                <ToolStatusTitle
+                  active={pending()}
+                  activeText={i18n.t("ui.sessionTurn.status.gatheringContext")}
+                  doneText={i18n.t("ui.sessionTurn.status.gatheredContext")}
+                  split={false}
+                />
+              </span>
+              <span
+                data-slot="basic-tool-tool-subtitle"
+                class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+              >
+                <AnimatedCountList
+                  items={[
+                    { key: "ui.messagePart.context.read", count: summary().read },
+                    { key: "ui.messagePart.context.search", count: summary().search },
+                    { key: "ui.messagePart.context.list", count: summary().list },
+                  ]}
+                  fallback=""
+                />
+              </span>
             </span>
-            <span
-              data-slot="context-tool-group-summary"
-              class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-text-base"
-            >
-              <AnimatedCountList
-                items={[
-                  { key: "ui.messagePart.context.read", count: summary().read },
-                  { key: "ui.messagePart.context.search", count: summary().search },
-                  { key: "ui.messagePart.context.list", count: summary().list },
-                ]}
-                fallback=""
-              />
-            </span>
-          </span>
-          <Collapsible.Arrow />
-        </div>
-      </Collapsible.Trigger>
-      <Collapsible.Content>
+          </div>
+        }
+      >
         <div data-component="context-tool-group-list">
           <Index each={props.tools}>
             {(tool) => {
@@ -557,8 +554,8 @@ export function CurrentContextToolGroup(props: {
             }}
           </Index>
         </div>
-      </Collapsible.Content>
-    </Collapsible>
+      </BasicTool>
+    </div>
   )
 }
 
@@ -1185,7 +1182,7 @@ ToolRegistry.register({
   },
 })
 
-function ConsoleOutput(props: { copy: string; children: JSX.Element }) {
+function ConsoleOutput(props: { copy: string; children: JSX.Element; variant?: "shell" }) {
   const i18n = useI18n()
   const [copied, setCopied] = createSignal(false)
 
@@ -1197,7 +1194,7 @@ function ConsoleOutput(props: { copy: string; children: JSX.Element }) {
   }
 
   return (
-    <div data-component="bash-output" dir="ltr">
+    <div data-component="bash-output" data-variant={props.variant} dir="ltr">
       <div data-slot="bash-copy">
         <Tooltip value={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copy")} placement="top">
           <IconButton
@@ -1276,10 +1273,7 @@ ToolRegistry.register({
       if (typeof props.metadata.command === "string") return props.metadata.command
       return ""
     }
-    const text = createMemo(() => {
-      const out = stripAnsi(props.output ?? "").replace(/\r\n?/g, "\n")
-      return `${command()}${out ? "\n\n" + out : ""}`
-    })
+    const output = createMemo(() => stripAnsi(props.output ?? "").replace(/\r\n?/g, "\n"))
     return (
       <BasicTool
         {...props}
@@ -1291,10 +1285,7 @@ ToolRegistry.register({
           <div data-slot="basic-tool-tool-info-structured">
             <div data-slot="basic-tool-tool-info-main">
               <span data-slot="basic-tool-tool-title">
-                <TextShimmer
-                  text={i18n.t("ui.tool.shell")}
-                  active={pending()}
-                />
+                <TextShimmer text={i18n.t("ui.tool.shell")} active={pending()} />
               </span>
               <Show when={!open()}>
                 <Show
@@ -1312,11 +1303,9 @@ ToolRegistry.register({
           </div>
         )}
       >
-        <ConsoleOutput copy={command()}>
-          <span data-slot="bash-prompt" aria-hidden="true">
-            {"$ "}
-          </span>
-          {text()}
+        <ConsoleOutput copy={command()} variant="shell">
+          <span data-slot="bash-command">{command()}</span>
+          <Show when={output()}>{(value) => <span data-slot="bash-result">{value()}</span>}</Show>
         </ConsoleOutput>
       </BasicTool>
     )

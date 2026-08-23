@@ -570,10 +570,13 @@ export const dict = {
   "toast.update.action.notYet": "Not yet",
 
   "error.page.title": "Something went wrong",
+  "error.page.title.status": "Server request failed",
   "error.page.description": "An error occurred while loading the application.",
+  "error.page.description.status": "The server returned an HTTP {{status}} response.",
   "error.page.description.localServerStartup": "An error occurred while starting the local server.",
   "error.page.details.label": "Error Details",
   "error.page.action.restart": "Restart",
+  "error.page.action.reload": "Reload",
   "error.page.action.report": "Report Error",
   "error.page.action.reported": "Error Reported",
   "error.page.action.exportLogs": "Export Logs",
@@ -948,6 +951,8 @@ export const dict = {
   "settings.general.row.showTerminal.description": "Show the terminal button in the desktop title bar",
   "settings.general.row.showStatus.title": "Server status",
   "settings.general.row.showStatus.description": "Show the server status button in the title bar",
+  "settings.general.row.showProjectIcon.title": "Project icon",
+  "settings.general.row.showProjectIcon.description": "Show the project icon in the session header",
   "settings.general.row.mobileTitlebarBottom.title": "Bottom navigation",
   "settings.general.row.mobileTitlebarBottom.description":
     "Place the title bar and session tabs at the bottom of the screen on mobile",

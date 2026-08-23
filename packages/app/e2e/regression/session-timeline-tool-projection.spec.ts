@@ -98,9 +98,9 @@ test("labels completed searches with result counts", async ({ page }) => {
 
   const group = page.locator(`[data-timeline-part-ids="${glob},${grep}"]`)
   await group.locator('[data-slot="collapsible-trigger"]').click()
-  const rows = group.locator('[data-component="tool-trigger"]')
-  await expect(rows.nth(0)).toContainText("(1 match)")
-  await expect(rows.nth(1)).toContainText("(12 matches)")
+  const rows = group.locator('[data-component="context-tool-group-list"] [data-component="tool-trigger"]')
+  await expect(rows.filter({ hasText: "Glob" })).toContainText("(1 match)")
+  await expect(rows.filter({ hasText: "Grep" })).toContainText("(12 matches)")
 })
 
 test("labels read tools from their path input", async ({ page }) => {
@@ -111,7 +111,11 @@ test("labels read tools from their path input", async ({ page }) => {
 
   const group = page.locator(`[data-timeline-part-ids="${id}"]`)
   await group.locator('[data-slot="collapsible-trigger"]').click()
-  await expect(group.locator('[data-slot="basic-tool-tool-subtitle"]')).toHaveText("a.ts")
+  await expect(
+    group
+      .locator('[data-component="context-tool-group-list"] [data-component="tool-trigger"]')
+      .filter({ hasText: "Read" }),
+  ).toContainText("a.ts")
 })
 
 test("labels skill tools from IDs and result metadata", async ({ page }) => {

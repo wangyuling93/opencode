@@ -318,7 +318,7 @@ export function reuseTimelineRows(previous: TimelineRow.TimelineRow[] | undefine
   const groupByPart = new Map<string, PriorGroup>()
   previous.forEach((row, index) => {
     if (row._tag !== "AssistantPart" || row.group.type === "part") return
-    row.group.refs.forEach((ref) => groupByPart.set(groupPartKey(row.userMessageID, ref), { index, row }))
+    row.group.refs.forEach((ref) => groupByPart.set(groupPartKey(ref), { index, row }))
   })
   const reserved = new Map<string, number>()
   rows.forEach((row, index) => {
@@ -392,7 +392,8 @@ function indexAssistantMessages(messages: SessionMessageInfo[]) {
   messages.forEach((message) => {
     if (message.type === "user") userID = message.id
     if (message.type === "shell") userID = undefined
-    if (message.type !== "assistant" || !userID) return
+    if (message.type !== "assistant") return
+    if (!userID) userID = message.id
     const existing = result.get(userID)
     if (existing) {
       existing.push(message)
@@ -413,7 +414,7 @@ function stabilizeGroupKey(
 ) {
   if (row._tag !== "AssistantPart" || row.group.type === "part") return row
   const existing = row.group.refs.reduce<PriorGroup | undefined>((result, ref) => {
-    const candidate = groupByPart.get(groupPartKey(row.userMessageID, ref))
+    const candidate = groupByPart.get(groupPartKey(ref))
     if (!candidate) return result
     const key = TimelineRow.key(candidate.row)
     if (claimed.has(key)) return result
@@ -432,8 +433,10 @@ function stabilizeGroupKey(
   })
 }
 
-function groupPartKey(userMessageID: string, ref: PartRef) {
-  return `${userMessageID}:${ref.messageID}:${ref.partID}`
+// Part refs are globally unique; keying by the turn would break reuse when a
+// page-boundary turn regroups under its real user message after a history prepend.
+function groupPartKey(ref: PartRef) {
+  return `${ref.messageID}:${ref.partID}`
 }
 
 function renderable(content: Content, showReasoning: boolean) {
@@ -530,7 +533,7 @@ function cleanHeading(value: string) {
     .trim()
 }
 
-function unwrapErrorMessage(message: string) {
+export function unwrapErrorMessage(message: string) {
   const text = message.replace(/^Error:\s*/, "").trim()
   const parse = (value: string) => Option.getOrUndefined(decodeJson(value))
   const read = (value: string) => {

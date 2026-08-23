@@ -12,10 +12,12 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Button } from "@opencode-ai/ui/button"
+import { Card } from "@opencode-ai/ui/card"
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
   SessionMessageAssistant,
+  SessionMessageCompaction,
   SessionMessageUser,
 } from "@opencode-ai/client/promise"
 import type { SessionUserActions, SessionUserComment } from "../actions"
@@ -159,7 +161,7 @@ function PacedMarkdown(props: { text: string; cacheKey: string; streaming: boole
 
   return (
     <Show when={value()}>
-      <Markdown text={value()} cacheKey={props.cacheKey} streaming={props.streaming} />
+      <Markdown text={value()} cacheKey={props.cacheKey} streaming={props.streaming} deferUntilReady />
     </Show>
   )
 }
@@ -383,12 +385,43 @@ export function MessageDivider(props: { label: string }) {
   )
 }
 
+export function SessionCompactionMessage(props: { message: SessionMessageCompaction; error: string }) {
+  const i18n = useI18n()
+  const summary = () => (props.message.status === "failed" ? "" : props.message.summary)
+  const error = () => {
+    if (props.message.status !== "failed" || props.message.error.type === "aborted") return ""
+    return props.error
+  }
+
+  return (
+    <div data-component="session-compaction-message">
+      <MessageDivider label={i18n.t("ui.messagePart.compaction")} />
+      <Show when={summary().trim()}>
+        <div data-component="text-part" data-timeline-part-id={props.message.id}>
+          <div data-slot="text-part-body">
+            <PacedMarkdown
+              text={summary()}
+              cacheKey={props.message.id}
+              streaming={props.message.status === "running"}
+            />
+          </div>
+        </div>
+      </Show>
+      <Show when={error()}>
+        <Card variant="error" class="error-card">
+          {error()}
+        </Card>
+      </Show>
+    </div>
+  )
+}
+
 export function AssistantTextContent(props: {
   id: string
   text: string
   message: SessionMessageAssistant
   showCopy: boolean
-  turnDurationMs?: number
+  turnDurationMs?: number | null
 }) {
   const data = useData()
   const i18n = useI18n()
@@ -404,11 +437,13 @@ export function AssistantTextContent(props: {
   const duration = createMemo(() => {
     const completed = props.message.time.completed
     const ms =
-      typeof props.turnDurationMs === "number"
-        ? props.turnDurationMs
-        : typeof completed === "number"
-          ? completed - props.message.time.created
-          : -1
+      props.turnDurationMs === null
+        ? -1
+        : typeof props.turnDurationMs === "number"
+          ? props.turnDurationMs
+          : typeof completed === "number"
+            ? completed - props.message.time.created
+            : -1
     if (!(ms >= 0)) return ""
     const total = Math.round(ms / 1000)
     if (total < 60) return i18n.t("ui.message.duration.seconds", { count: numfmt().format(total) })

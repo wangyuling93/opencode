@@ -507,6 +507,29 @@ export const terminalPassedDocument = document([
   }),
 ] satisfies SessionMessageInfo[])
 
+export const expandedShellDocument = document([
+  user("msg_user_shell_expanded", "Inspect the active service and its available feature surface.", 52_100),
+  assistant({
+    id: "msg_assistant_shell_expanded",
+    offset: 52_200,
+    completed: 52_900,
+    content: [
+      completedTool({
+        id: "tool_shell_expanded",
+        name: "shell",
+        offset: 52_300,
+        args: {
+          command:
+            "opencode2 api get /openapi.json > /private/var/folders/j/gd69b2|16y91666jzf3p9g22asdasc0000gn/T/opencode/temp/tes",
+        },
+        output:
+          '{"location":{"directory":"/Users/usrnk1","project":{"id":"global","directory":"/","canonical":"/"}},"data":[{"id":"opencode","name":"OpenCode","description":"Use this skill for any question about OpenCode itself, including how OpenCode works, using or configuring it, migrating from V1 to V2, troubleshooting it, developing plugins or integrations, using the OpenCode SDK, clients, server, or API, and contributing to the OpenCode codebase."}]}',
+        metadata: { exit: 0 },
+      }),
+    ],
+  }),
+] satisfies SessionMessageInfo[])
+
 export const terminalFailedDocument = document([
   user("msg_user_terminal_failed", "Run the focused Session UI tests.", 53_000),
   assistant({
@@ -917,7 +940,7 @@ export const retryDocument = document(
   { type: "busy" },
 )
 
-export const compactionDocument = document([
+const compactionPrelude = [
   user("msg_user_compact", "Continue the implementation after compacting context.", 60_000),
   assistant({
     id: "msg_assistant_before_compact",
@@ -926,6 +949,26 @@ export const compactionDocument = document([
     content: [{ type: "text", text: "I inspected the timeline and identified the current message boundary." }],
     error: { type: "ExecutionInterrupted", message: "Context compaction started" },
   }),
+] satisfies SessionMessageInfo[]
+
+export const compactionRunningDocument = document(
+  [
+    ...compactionPrelude,
+    {
+      id: "msg_compaction_running",
+      type: "compaction",
+      status: "running",
+      reason: "auto",
+      summary: "## Goal\n\nRestore compaction output while preserving timeline notices.",
+      recent: "",
+      time: { created: STORY_TIME + 63_000 },
+    },
+  ] satisfies SessionMessageInfo[],
+  { type: "busy" },
+)
+
+export const compactionDocument = document([
+  ...compactionPrelude,
   {
     id: "msg_compaction_complete",
     type: "compaction",
@@ -941,6 +984,30 @@ export const compactionDocument = document([
     completed: 66_000,
     content: [{ type: "text", text: "Context restored. I continued from the durable Session messages." }],
   }),
+] satisfies SessionMessageInfo[])
+
+export const compactionFailedDocument = document([
+  ...compactionPrelude,
+  {
+    id: "msg_compaction_failed",
+    type: "compaction",
+    status: "failed",
+    reason: "auto",
+    error: { type: "compaction.failed", message: "The provider rejected the compaction request." },
+    time: { created: STORY_TIME + 63_000 },
+  },
+] satisfies SessionMessageInfo[])
+
+export const compactionCancelledDocument = document([
+  ...compactionPrelude,
+  {
+    id: "msg_compaction_cancelled",
+    type: "compaction",
+    status: "failed",
+    reason: "manual",
+    error: { type: "aborted", message: "Compaction cancelled" },
+    time: { created: STORY_TIME + 63_000 },
+  },
 ] satisfies SessionMessageInfo[])
 
 export const subagentDocument = document(
