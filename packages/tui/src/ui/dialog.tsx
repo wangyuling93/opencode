@@ -2,7 +2,8 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
 import { Keymap } from "../context/keymap"
 import { overlayPlate, useTheme, useThemes } from "../context/theme"
-import { MouseButton, Renderable, RGBA } from "@opentui/core"
+import { InputRenderable, MouseButton, Renderable, RGBA } from "@opentui/core"
+
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
 import { useClipboard } from "../context/clipboard"
@@ -127,7 +128,7 @@ function init() {
 
   Keymap.createLayer(() => ({
     mode: "modal",
-    enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
+    enabled: store.stack.length > 0,
     commands: [
       {
         bind: "escape",
@@ -136,6 +137,7 @@ function init() {
         run: () => {
           if (renderer.getSelection()) {
             renderer.clearSelection()
+            return
           }
           const current = store.stack.at(-1)
           current?.onClose?.()
@@ -150,6 +152,13 @@ function init() {
         run: () => {
           if (renderer.getSelection()) {
             renderer.clearSelection()
+            return
+          }
+          const editor = renderer.currentFocusedEditor
+          if (editor?.plainText) {
+            if (editor instanceof InputRenderable) editor.value = ""
+            else editor.setText("")
+            return
           }
           const current = store.stack.at(-1)
           current?.onClose?.()
@@ -240,7 +249,9 @@ export function DialogProvider(props: ParentProps) {
           evt.preventDefault()
           evt.stopPropagation()
         }}
-        onMouseUp={copyOnSelectEnabled() ? (event) => copyOnSelectRelease(event, renderer, toast, clipboard) : undefined}
+        onMouseUp={
+          copyOnSelectEnabled() ? (event) => copyOnSelectRelease(event, renderer, toast, clipboard) : undefined
+        }
 
       >
         <Show when={value.stack.length}>
