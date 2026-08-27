@@ -72,6 +72,19 @@ setup(ctx) {
 }
 ```
 
+`ctx.location` describes the location where this plugin instance is loaded. It
+includes `directory`, optional `workspaceID`, and `project` metadata (`id`,
+`directory`, and `canonical`). It is available in both Promise and Effect plugins.
+This is the plugin instance's location, not the location of every session it can
+access or event it receives.
+
+```ts
+setup(ctx) {
+  console.log(ctx.location.directory)
+  console.log(ctx.location.project.canonical)
+}
+```
+
 ### Options
 
 Pass plugin options with the object form in `opencode.json(c)`.
@@ -488,25 +501,14 @@ interface IntegrationDraft {
 
 ### MCP
 
-List MCP servers or change their connection state.
+List MCP servers and their current connection state.
 
 ```ts
 const servers = await ctx.mcp.list()
-await ctx.mcp.connect({ server: "docs" })
-await ctx.mcp.disconnect({ server: "docs" })
 ```
 
-Add or remove a server through the connected API.
-
-```ts
-await ctx.mcp.add({
-  server: "docs",
-  config: { type: "remote", url: "https://mcp.example.com" },
-})
-await ctx.mcp.remove({ server: "legacy" })
-```
-
-Register a transform to inspect, set, update, or remove server configuration.
+Plugins manage MCP servers only through transforms. Use `draft.set` to add or replace a server, `draft.update` to
+change its configuration, and `draft.remove` to remove it. Inspect configuration with `draft.list` and `draft.get`.
 
 ```ts
 await ctx.mcp.transform((draft) => {
@@ -520,7 +522,10 @@ await ctx.mcp.transform((draft) => {
 })
 ```
 
-Reload MCP configuration after external state used by a transform changes.
+Set `disabled: true` in a transform to disable a server and disconnect it, or `disabled: false` to enable it and allow
+OpenCode to connect. OpenCode reconciles server lifecycle from the transformed configuration.
+
+Call `reload()` after external state used by a transform changes to reapply transforms and reconcile the servers.
 
 ```ts
 await ctx.mcp.reload()
@@ -534,10 +539,6 @@ Schemas: [`Mcp.Server`](/api#schema-Mcp.Server), [`Mcp.LocalConfigEncoded`](/api
 ```ts
 interface MCPContext {
   list(input?: McpListInput, requestOptions?: RequestOptions): Promise<McpListOutput>
-  add(input: McpAddInput, requestOptions?: RequestOptions): Promise<void>
-  remove(input: McpRemoveInput, requestOptions?: RequestOptions): Promise<void>
-  connect(input: McpConnectInput, requestOptions?: RequestOptions): Promise<void>
-  disconnect(input: McpDisconnectInput, requestOptions?: RequestOptions): Promise<void>
   transform(callback: (draft: MCPDraft) => void): Promise<Registration>
   reload(): Promise<void>
 }
@@ -783,10 +784,12 @@ interface StorageScanResult {
 
 ### Tools
 
-Register tools with a transform.
+Register, update, and remove tools with a transform. The callback is synchronous, including in Promise plugins; load external
+data before registering or reloading. OpenCode replays active transforms in registration order on a fresh draft.
+For the same effective tool name, a later valid registration overrides an earlier one.
 
 ```ts
-await ctx.tool.transform((draft) => {
+const registration = await ctx.tool.transform((draft) => {
   draft.add({
     name: "greeting",
     description: "Create a greeting",
@@ -805,6 +808,43 @@ await ctx.tool.transform((draft) => {
 })
 ```
 
+Call `reload()` after changing source data captured by the callback. Reload replays the active transforms without
+changing their order; it does not rerun plugin setup.
+
+```ts
+await ctx.tool.reload()
+```
+
+Use `list()` and `get()` to inspect tools currently in the draft. Tools have an `id` containing their effective name,
+and `get()` returns `undefined` when that ID is not present. Use `update` and `remove` with the effective tool name,
+including its namespace (`acme_greeting` above). Dots in
+namespaces and unsupported characters in tool names become `_`. Missing names are ignored; creating a tool requires
+`add` with a complete definition. Updates preserve the name and namespace. Assign new schemas or options to replace
+them rather than mutating nested values. Invalid updates are logged and leave the previous definition intact.
+
+```ts
+await ctx.tool.transform((draft) => {
+  draft.update("acme_greeting", (tool) => {
+    tool.description = "Greet the user by name"
+  })
+  draft.remove("acme_obsolete")
+})
+```
+
+Updates and removals replay in order with additions, including after MCP catalog refreshes. Disposing their
+registration removes those changes and rebuilds from the remaining transforms.
+
+Dispose a registration to remove its transform and rebuild from the remaining transforms, revealing any earlier
+definition it overrode. Disposal is idempotent, and unloading the plugin also disposes its registrations.
+
+```ts
+await registration.dispose()
+```
+
+Each model request captures a tool snapshot. Reload and disposal affect future snapshots, not the definitions or
+executors already captured by an existing request. Executors that close over mutable plugin data still observe
+that data; capture a value inside the transform when it must remain tied to that definition.
+
 #### Reference
 
 Schemas: [`Tool.Content`](/api#schema-Tool.Content), [`Tool.TextContent`](/api#schema-Tool.TextContent),
@@ -813,10 +853,15 @@ Schemas: [`Tool.Content`](/api#schema-Tool.Content), [`Tool.TextContent`](/api#s
 ```ts
 interface ToolContext {
   transform(callback: (draft: ToolDraft) => void): Promise<Registration>
+  reload(): Promise<void>
 }
 
 interface ToolDraft {
+  list(): readonly (ToolInfo & { readonly id: string })[]
+  get(id: string): (ToolInfo & { readonly id: string }) | undefined
   add(tool: ToolInfo): void
+  update(id: string, update: (tool: Types.Mutable<ToolInfo>) => void): void
+  remove(id: string): void
 }
 ```
 

@@ -73,6 +73,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
 
   return {
     app,
+    location: locationInfo(),
     options: {},
     agent: {
       get: (input) => {
@@ -288,26 +289,6 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
         if (ref && !isCurrentLocation(ref)) return runtime.location.mcp.list(ref)
         return response(mcp.servers())
       },
-      add: (input) => {
-        const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return runtime.location.mcp.add(ref, input.server, input.config)
-        return mcp.add(input.server, input.config)
-      },
-      remove: (input) => {
-        const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return runtime.location.mcp.remove(ref, input.server)
-        return mcp.remove(input.server)
-      },
-      connect: (input) => {
-        const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return runtime.location.mcp.connect(ref, input.server)
-        return mcp.connect(input.server)
-      },
-      disconnect: (input) => {
-        const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return runtime.location.mcp.disconnect(ref, input.server)
-        return mcp.disconnect(input.server)
-      },
       reload: mcp.reload,
       transform: (callback) =>
         mcp.transform((draft) => {
@@ -377,14 +358,8 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
       hook: (name, callback) => hooks.register("shell", name, callback),
     },
     tool: {
-      transform: (callback) =>
-        tools
-          .transform((draft) =>
-            callback({
-              add: (tool) => draft.add(tool),
-            }),
-          )
-          .pipe(Effect.orDie, Effect.as({ dispose: Effect.void })),
+      transform: tools.transform,
+      reload: tools.reload,
       hook: (name, callback) => hooks.register("tool", name, callback),
     },
     vcs: {

@@ -125,6 +125,7 @@
         "@effect/platform-node": "catalog:",
         "@opencode-ai/client": "workspace:*",
         "@opencode-ai/plugin": "workspace:*",
+        "@opencode-ai/pty": "0.1.12",
         "@opencode-ai/schema": "workspace:*",
         "@opencode-ai/server": "workspace:*",
         "@opencode-ai/tui": "workspace:*",
@@ -349,7 +350,6 @@
         "@ai-sdk/cohere": "3.0.27",
         "@ai-sdk/gateway": "3.0.104",
         "@ai-sdk/google-vertex": "4.0.128",
-        "@ai-sdk/groq": "3.0.31",
         "@ai-sdk/mistral": "3.0.51",
         "@ai-sdk/openai-compatible": "2.0.41",
         "@ai-sdk/perplexity": "3.0.26",
@@ -364,6 +364,7 @@
         "@opencode-ai/ai": "workspace:*",
         "@opencode-ai/codemode": "workspace:*",
         "@opencode-ai/plugin": "workspace:*",
+        "@opencode-ai/pty": "0.1.12",
         "@opencode-ai/schema": "workspace:*",
         "@opencode-ai/util": "workspace:*",
         "@parcel/watcher": "2.5.1",
@@ -552,6 +553,20 @@
         "@typescript/native-preview": "catalog:",
       },
     },
+    "packages/latex": {
+      "name": "@opencode-ai/latex",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/plugin": "workspace:*",
+        "@opentui/core": "catalog:",
+        "string-width": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
     "packages/merman": {
       "name": "@opencode-ai/merman",
       "version": "0.0.0",
@@ -730,6 +745,7 @@
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "20.0.11",
+        "@playwright/test": "catalog:",
         "@tsconfig/node22": "catalog:",
         "@types/bun": "catalog:",
         "@types/luxon": "catalog:",
@@ -835,6 +851,7 @@
         "@opencode-ai/client": "workspace:*",
         "@opencode-ai/session-ui": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
+        "@playwright/test": "catalog:",
         "@solidjs/meta": "catalog:",
         "@storybook/addon-a11y": "10.4.4",
         "@storybook/addon-docs": "10.4.4",
@@ -876,6 +893,7 @@
       "dependencies": {
         "@opencode-ai/client": "workspace:*",
         "@opencode-ai/core": "workspace:*",
+        "@opencode-ai/latex": "workspace:*",
         "@opencode-ai/merman": "workspace:*",
         "@opencode-ai/plugin": "workspace:*",
         "@opencode-ai/schema": "workspace:*",
@@ -2147,6 +2165,8 @@
 
     "@opencode-ai/httpapi-codegen": ["@opencode-ai/httpapi-codegen@workspace:packages/httpapi-codegen"],
 
+    "@opencode-ai/latex": ["@opencode-ai/latex@workspace:packages/latex"],
+
     "@opencode-ai/merman": ["@opencode-ai/merman@workspace:packages/merman"],
 
     "@opencode-ai/plugin": ["@opencode-ai/plugin@workspace:packages/plugin"],
@@ -2154,6 +2174,20 @@
     "@opencode-ai/posts": ["@opencode-ai/posts@workspace:packages/posts"],
 
     "@opencode-ai/protocol": ["@opencode-ai/protocol@workspace:packages/protocol"],
+
+    "@opencode-ai/pty": ["@opencode-ai/pty@0.1.12", "", { "optionalDependencies": { "@opencode-ai/pty-darwin-arm64": "0.1.12", "@opencode-ai/pty-darwin-x64": "0.1.12", "@opencode-ai/pty-linux-arm64-gnu": "0.1.12", "@opencode-ai/pty-linux-arm64-musl": "0.1.12", "@opencode-ai/pty-linux-x64-gnu": "0.1.12", "@opencode-ai/pty-linux-x64-musl": "0.1.12" }, "bin": { "opencode-pty": "bin/opencode-pty.js" } }, "sha512-dl4FyJUhTXThsWYY8txG/8/nwN7dE0M5Sic9r4L9f2pvtJnbR5zrCrPoiPIBIxZle1wVks1dhz4z/CfqLf5sCg=="],
+
+    "@opencode-ai/pty-darwin-arm64": ["@opencode-ai/pty-darwin-arm64@0.1.12", "", { "os": "darwin", "cpu": "arm64" }, "sha512-tMvoriq3VegVlj1uEglc6qE0M7VXy61nyf9Si7tTO7xa8JiyxuFJSXOZ1pGeErDu+pe24hvTyVOR+gkdew8w9g=="],
+
+    "@opencode-ai/pty-darwin-x64": ["@opencode-ai/pty-darwin-x64@0.1.12", "", { "os": "darwin", "cpu": "x64" }, "sha512-Sn5vMLL5giHOhx7J5H6zwDp4YjjXorY+QV0IEYY+SCT4wQfRBliokIyj23pRl6P2RK3u9bDLXJHDNMfDVZ2Rxg=="],
+
+    "@opencode-ai/pty-linux-arm64-gnu": ["@opencode-ai/pty-linux-arm64-gnu@0.1.12", "", { "os": "linux", "cpu": "arm64" }, "sha512-HbnlKZy052l7G527wK0+05EXaUpZ4ykVAmNBEzqWCoi4TeQj2+Nr9kJ9trx9o1KrVcT4Ki58CCvN5QOls6Z0yQ=="],
+
+    "@opencode-ai/pty-linux-arm64-musl": ["@opencode-ai/pty-linux-arm64-musl@0.1.12", "", { "os": "linux", "cpu": "arm64" }, "sha512-2nTN7ggu1h9XgjNcoQMYjP5sirfYnAskpdFCOqjokLqhytX/IMMmkRTQs+foaEaPz0dAIQD3DQplR2jZIgxp1w=="],
+
+    "@opencode-ai/pty-linux-x64-gnu": ["@opencode-ai/pty-linux-x64-gnu@0.1.12", "", { "os": "linux", "cpu": "x64" }, "sha512-FnD5ndnObTQKAoaVvxLKi5W+r3/+dsaMsobz6uK0B9hlmffXxY5CQ6HQyUU/h3aIKLWXxho5XYkA2b9yrp8/gA=="],
+
+    "@opencode-ai/pty-linux-x64-musl": ["@opencode-ai/pty-linux-x64-musl@0.1.12", "", { "os": "linux", "cpu": "x64" }, "sha512-prkrNu6uvjqoffxdGiDHSU5C0Y+kCSfv+lslu7dfRPgPKenVELNpRTAbOduyrWPac2vGt8j5NM61icJyodbJmA=="],
 
     "@opencode-ai/schema": ["@opencode-ai/schema@workspace:packages/schema"],
 
