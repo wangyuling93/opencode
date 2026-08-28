@@ -807,6 +807,28 @@ describe("OpenAI Chat route", () => {
     }),
   )
 
+  it.effect("finishes at the done sentinel without waiting for response EOF", () =>
+    Effect.gen(function* () {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(sseEvents(deltaChunk({ content: "Hello" }), deltaChunk({}, "stop"))),
+          )
+        },
+      })
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(stream, {
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      )
+
+      expect(response.text).toBe("Hello")
+      expect(response.events.at(-1)?.type).toBe("finish")
+    }),
+  )
+
   it.effect("preserves streamed refusals as ordinary assistant text", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(
@@ -1457,7 +1479,7 @@ describe("OpenAI Chat route", () => {
       expect(error.message).toContain("OpenAI Chat tool call delta is missing id or name")
       expect(error.reason._tag).toBe("InvalidProviderOutput")
       if (error.reason._tag !== "InvalidProviderOutput") return
-      expect(decodeJson(error.reason.raw ?? "")).toMatchObject({
+      expect(decodeJson(error.reason.body ?? "")).toMatchObject({
         choices: [{ finish_reason: "tool_calls" }],
       })
     }),
@@ -1534,9 +1556,9 @@ describe("OpenAI Chat route", () => {
       )
 
       expect((yield* Ref.get(events)).some((event) => event.type === "text-delta")).toBeTrue()
+      expect(error.message).toBe("ECONNRESET: socket closed unexpectedly")
       expect(error.reason).toMatchObject({
         _tag: "Transport",
-        message: "ECONNRESET: socket closed unexpectedly",
         transport: "http",
         operation: "read",
         code: "ECONNRESET",
@@ -1552,9 +1574,9 @@ describe("OpenAI Chat route", () => {
         Effect.flip,
       )
 
+      expect(error.message).toBe("ECONNRESET: socket closed before output")
       expect(error.reason).toMatchObject({
         _tag: "Transport",
-        message: "ECONNRESET: socket closed before output",
         transport: "http",
         operation: "read",
         code: "ECONNRESET",
@@ -1575,7 +1597,7 @@ describe("OpenAI Chat route", () => {
       )
 
       expect(error).toBeInstanceOf(AIError)
-      expect(error.reason).toMatchObject({ _tag: "InvalidRequest", message: "Bad request" })
+      expect(error).toMatchObject({ reason: { _tag: "InvalidRequest" }, message: "Bad request" })
     }),
   )
 

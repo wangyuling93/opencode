@@ -203,6 +203,7 @@ import type {
   ExperimentalPersistentPtyCreateInput,
   ExperimentalPersistentPtyCreateOutput,
   ExperimentalPersistentPtyShutdownOutput,
+  ExperimentalPersistentPtyHandoffOutput,
   ExperimentalPersistentPtyGetInput,
   ExperimentalPersistentPtyGetOutput,
   ExperimentalPersistentPtyUpdateInput,
@@ -359,6 +360,7 @@ const EndpointSessionCreate = (raw: RawClient["server.session"]) => (input?: Ses
         agent: input?.["agent"],
         model: input?.["model"],
         location: input?.["location"],
+        metadata: input?.["metadata"],
       },
     }).pipe(
       Effect.mapError(mapClientError),
@@ -1265,6 +1267,11 @@ const EndpointExperimentalPersistentPtyShutdown = (raw: RawClient["server.experi
     raw["persistentPty.shutdown"]({}).pipe(Effect.mapError(mapClientError)),
   )
 
+const EndpointExperimentalPersistentPtyHandoff = (raw: RawClient["server.experimental"]) => () =>
+  preserveEffect<ExperimentalPersistentPtyHandoffOutput>()(
+    raw["persistentPty.handoff"]({}).pipe(Effect.mapError(mapClientError)),
+  )
+
 const EndpointExperimentalPersistentPtyGet =
   (raw: RawClient["server.experimental"]) => (input: ExperimentalPersistentPtyGetInput) =>
     preserveEffect<ExperimentalPersistentPtyGetOutput>()(
@@ -1318,6 +1325,7 @@ const adaptGroupExperimental = (raw: RawClient["server.experimental"]) => ({
     list: EndpointExperimentalPersistentPtyList(raw),
     create: EndpointExperimentalPersistentPtyCreate(raw),
     shutdown: EndpointExperimentalPersistentPtyShutdown(raw),
+    handoff: EndpointExperimentalPersistentPtyHandoff(raw),
     get: EndpointExperimentalPersistentPtyGet(raw),
     update: EndpointExperimentalPersistentPtyUpdate(raw),
     snapshot: EndpointExperimentalPersistentPtySnapshot(raw),

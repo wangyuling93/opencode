@@ -42,6 +42,7 @@ import { tmpdir } from "./fixture/tmpdir"
 import { tempGlobalLayer } from "./fixture/global"
 import { testEffect } from "./lib/effect"
 import { permissionLayer } from "./lib/permission"
+import { Expected } from "./lib/session-message"
 import { toolIdentity, executeTool, registerToolPlugin, toolDefinitions } from "./lib/tool"
 
 const sessionID = Session.ID.make("ses_shell_tool_test")
@@ -214,7 +215,8 @@ const withSession = <A, E, R>(directory: string, body: (registry: Tool.Interface
     const locations = yield* LocationServiceMap.Service
     const locationLayer = locations.get(location)
     return yield* Effect.gen(function* () {
-      yield* (yield* PluginSupervisor.Service).flush
+      const plugins = yield* PluginSupervisor.Service
+      yield* plugins.flush
       const registry = yield* Tool.Service
       return yield* body(registry)
     }).pipe(Effect.provide(locationLayer), Effect.ensuring(locations.invalidate(location)))
@@ -654,10 +656,7 @@ describe("ShellTool ordinary shell syntax", () => {
                 value: { status: "completed", metadata: { exit: 0 } },
               })
               if (Exit.isSuccess(result.exit))
-                expect(result.exit.value.content?.[0]).toEqual({
-                  type: "text",
-                  text: isWindows ? "hello\r\n" : "hello\n",
-                })
+                expect(result.exit.value.content?.[0]).toEqual(Expected.text(isWindows ? "hello\r\n" : "hello\n"))
             }),
           pwsh ?? "pwsh",
         ))
@@ -728,10 +727,9 @@ describe("ShellTool", () => {
               expect(settled.status).toBe("completed")
               expect(settled.metadata).toMatchObject({ exit: 0, truncated: false })
               expect(settled.content?.[0]).toEqual({ type: "text", text: "hello" })
-              expect(settled.content?.[1]).toMatchObject({
-                type: "text",
-                text: expect.stringContaining("Command exited with code 0."),
-              })
+              expect(settled.content?.[1]).toMatchObject(
+                Expected.text(expect.stringContaining("Command exited with code 0.")),
+              )
               expect(assertions).toMatchObject([
                 {
                   sessionID,
@@ -789,10 +787,9 @@ describe("ShellTool", () => {
           ),
           Effect.andThen((settled) =>
             Effect.sync(() =>
-              expect(settled.content?.[0]).toMatchObject({
-                type: "text",
-                text: expect.stringContaining(realpathSync(path.join(tmp.path, "src"))),
-              }),
+              expect(settled.content?.[0]).toMatchObject(
+                Expected.text(expect.stringContaining(realpathSync(path.join(tmp.path, "src")))),
+              ),
             ),
           ),
         )
@@ -1121,10 +1118,9 @@ describe("ShellTool", () => {
               expect(settled.status).toBe("completed")
               expect(settled.metadata).toMatchObject({ exit: 7, truncated: false })
               expect(settled.content?.[0]).toEqual({ type: "text", text: "body" })
-              expect(settled.content?.[1]).toMatchObject({
-                type: "text",
-                text: expect.stringContaining("Command exited with code 7"),
-              })
+              expect(settled.content?.[1]).toMatchObject(
+                Expected.text(expect.stringContaining("Command exited with code 7")),
+              )
             }),
           ),
         )
@@ -1151,10 +1147,9 @@ describe("ShellTool", () => {
                 if (!content || content.type !== "text") throw new Error("Expected text content")
                 expect(content.text.includes("output-start")).toBe(false)
                 expect(content.text.includes("output-end")).toBe(true)
-                expect(content).toMatchObject({
-                  type: "text",
-                  text: expect.stringContaining("output truncated; full output saved to:"),
-                })
+                expect(content).toMatchObject(
+                  Expected.text(expect.stringContaining("output truncated; full output saved to:")),
+                )
               }),
             ),
           )
@@ -1260,14 +1255,8 @@ describe("ShellTool", () => {
             Effect.andThen((settled) =>
               Effect.sync(() => {
                 expect(settled.metadata).toMatchObject({ timeout: true, truncated: false })
-                expect(settled.content?.[0]).toMatchObject({
-                  type: "text",
-                  text: expect.stringContaining("before timeout"),
-                })
-                expect(settled.content?.[1]).toMatchObject({
-                  type: "text",
-                  text: expect.stringContaining("Command timed out"),
-                })
+                expect(settled.content?.[0]).toMatchObject(Expected.text(expect.stringContaining("before timeout")))
+                expect(settled.content?.[1]).toMatchObject(Expected.text(expect.stringContaining("Command timed out")))
               }),
             ),
           )
@@ -1306,7 +1295,7 @@ describe("ShellTool", () => {
               },
               {
                 type: "text",
-                text: "You will be notified automatically when the command finishes. Avoid sleep commands or polling for completion; if you need the output before then, read the file directly.",
+                text: "You will be notified automatically when the command finishes. The notification will include the command's output. DO NOT run sleep commands or poll the output file to check for completion. You can read from the file when its current output would be useful, such as when inspecting logs from a background server. Otherwise, continue with other work or end your response.",
               },
             ])
             expect((yield* shell.list()).map((info) => info.id)).toContain(id)
@@ -1546,7 +1535,7 @@ describe("ShellTool", () => {
             })
             expect(settled.content?.[1]).toEqual({
               type: "text",
-              text: "You will be notified automatically when the command finishes. Avoid sleep commands or polling for completion; if you need the output before then, read the file directly.",
+              text: "You will be notified automatically when the command finishes. The notification will include the command's output. DO NOT run sleep commands or poll the output file to check for completion. You can read from the file when its current output would be useful, such as when inspecting logs from a background server. Otherwise, continue with other work or end your response.",
             })
             yield* Effect.sleep(Duration.millis(100))
             expect((yield* shell.get(id)).status).toBe("running")

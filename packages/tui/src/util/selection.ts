@@ -20,10 +20,12 @@ type Renderer = {
   } | null
   clearSelection: () => void
   currentFocusedRenderable?: FocusableSelectionTarget | null
+  currentFocusedEditor?: FocusableSelectionTarget | null
 }
 
 type SelectionKeyEvent = {
   ctrl?: boolean
+  baseCode?: number
   name: string
   preventDefault: () => void
   stopPropagation: () => void
@@ -36,11 +38,7 @@ export function copyOnSelectRelease(
   clipboard: ClipboardService,
 ): boolean {
   if (!event.isDragging) return false
-  const selection = renderer.getSelection()
-  // Preserve the first click so OpenTUI can recognize the following double/triple click.
-  if (selection?.isStart && selection.behavior === "cell") return false
   return copy(renderer, toast, clipboard, { keep: true })
-
 }
 
 export function copy(
@@ -51,16 +49,10 @@ export function copy(
 ): boolean {
   const selection = renderer.getSelection()
   if (!selection) return false
-  if (selection.isStart && selection.behavior === "cell") {
-    renderer.clearSelection()
-    return false
-  }
+  if (selection.isStart && selection.behavior === "cell") return false
 
   const text = selection.getSelectedText()
-  if (!text) {
-    renderer.clearSelection()
-    return false
-  }
+  if (!text) return false
 
   const focus = renderer.currentFocusedRenderable
   const clipboardText =
@@ -82,12 +74,16 @@ export function handleSelectionKey(
   toast: Toast,
   event: SelectionKeyEvent,
   clipboard: ClipboardService,
+  copyOnSelect: boolean,
 ) {
   const selection = renderer.getSelection()
   if (!selection) return
+  const focus = renderer.currentFocusedEditor
+  const editing = focus?.hasSelection() && selection.selectedRenderables.includes(focus)
 
-  if (event.ctrl && event.name === "c") {
-    if (!copy(renderer, toast, clipboard)) {
+  // Kitty can report a non-Latin key name with a Latin base-layout C.
+  if (event.ctrl && (event.name === "c" || event.baseCode === 99 || event.baseCode === 67)) {
+    if ((copyOnSelect && !editing) || !copy(renderer, toast, clipboard)) {
       renderer.clearSelection()
       return
     }
@@ -98,14 +94,15 @@ export function handleSelectionKey(
   }
 
   if (event.name === "escape") {
+    const text = selection.isStart && selection.behavior === "cell" ? "" : selection.getSelectedText()
     renderer.clearSelection()
+    if (!text) return
     event.preventDefault()
     event.stopPropagation()
     return
   }
 
-  const focus = renderer.currentFocusedRenderable
-  if (focus?.hasSelection() && selection.selectedRenderables.includes(focus)) return
+  if (editing) return
 
   renderer.clearSelection()
 }
