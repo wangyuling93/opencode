@@ -98,7 +98,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
       list: (input) => {
         const ref = locationRef(input)
         if (ref && !isCurrentLocation(ref)) return runtime.location.agent.list(ref)
-        return agents.list().pipe(Effect.map((data) => ({ location: locationInfo(), data })))
+        return response(agents.list())
       },
       reload: agents.reload,
       transform: (callback) =>
@@ -192,6 +192,11 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
     },
     event: {
       subscribe: () => bus.subscribe().pipe(Stream.filter(EventManifest.isServer)),
+    },
+    experimental: {
+      terminal: {
+        read: (input) => runtime.persistentPty.read(input.sessionID, input.lines),
+      },
     },
     generate: {
       text: (input) => generate.text(input).pipe(Effect.map((text) => ({ text }))),
@@ -364,9 +369,10 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
     },
     vcs: {
       get: () => response(vcs.info()),
+      base: () => response(vcs.base()),
       branches: (input) => response(vcs.branches({ search: input?.search, limit: input?.limit })),
       status: () => response(vcs.status()),
-      diff: (input) => response(vcs.diff(input.mode, { context: input.context })),
+      diff: (input) => response(vcs.diff(input.mode, { context: input.context, base: input.base })),
       transform: vcs.transform,
       reload: vcs.reload,
     },

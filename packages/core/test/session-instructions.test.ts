@@ -33,7 +33,7 @@ import { tempLocationLayer } from "./fixture/location"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { testEffect } from "./lib/effect"
 import { permissionLayer } from "./lib/permission"
-import { globalProjectLayer } from "./lib/project"
+import { globalProjectNode } from "./lib/project"
 import { executeTool, registerToolPlugin } from "./lib/tool"
 
 const readToolNode = makeLocationNode({
@@ -74,14 +74,14 @@ const testLayer = AppNodeBuilder.build(
     Image.node,
   ]),
   [
-    [Project.node, globalProjectLayer],
+    [Project.node, globalProjectNode],
     [SessionExecution.node, SessionExecution.noopLayer],
     [Location.node, tempLocationLayer],
     [Permission.node, permission],
     [Config.node, config],
     [Image.node, imageLayer],
   ],
-) as unknown as Layer.Layer<unknown>
+)
 
 const it = testEffect(testLayer)
 

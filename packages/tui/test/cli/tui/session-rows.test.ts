@@ -152,9 +152,7 @@ test("assigns stable IDs to tool rows for direct navigation", () => {
       { type: "text", text: "Starting a shell" },
       { type: "tool", id: "shell-1", name: "shell", state: pending(), time: { created: 2 } },
     ]),
-    assistant("assistant-2", [
-      { type: "tool", id: "shell-2", name: "shell", state: pending(), time: { created: 3 } },
-    ]),
+    assistant("assistant-2", [{ type: "tool", id: "shell-2", name: "shell", state: pending(), time: { created: 3 } }]),
   ]
   const rows = reduceSessionRows(messages)
   const boundaries = messageBoundaryIDs(rows, messages)
@@ -169,7 +167,13 @@ test("assigns stable IDs to tool rows for direct navigation", () => {
 test("finds background tool launch rows for completion navigation", () => {
   const messages: SessionMessageInfo[] = [
     assistant("assistant-1", [
-      { type: "tool", id: "shell-1", name: "shell", state: pending(), time: { created: 1 } },
+      {
+        type: "tool",
+        id: "shell-1",
+        name: "shell",
+        state: completed({ shellID: "sh_first", status: "running" }),
+        time: { created: 1 },
+      },
     ]),
     assistant("assistant-2", [
       {
@@ -214,6 +218,7 @@ test("finds background tool launch rows for completion navigation", () => {
   const rows = reduceSessionRows(messages)
 
   expect(backgroundToolRowIndex(rows, messages, { source: "shell", id: "shell-1" }, "completion-2")).toBe(0)
+  expect(backgroundToolRowIndex(rows, messages, { source: "shell", id: "sh_first" }, "completion-2")).toBe(0)
   expect(backgroundToolRowIndex(rows, messages, { source: "subagent", id: "child-1" }, "completion-1")).toBe(1)
   expect(backgroundToolRowIndex(rows, messages, { source: "subagent", id: "child-1" }, "completion-2")).toBe(3)
 })
@@ -401,17 +406,28 @@ test("completes exploration groups when another row follows", () => {
 
 test("hides synthetic messages without descriptions", () => {
   const messages: SessionMessageInfo[] = [
+    {
+      id: "shell-message",
+      type: "shell",
+      shellID: "sh_user",
+      command: "pwd",
+      status: "exited",
+      time: { created: 0 },
+    },
     assistant("assistant-1", [{ type: "tool", id: "read-1", name: "read", state: pending(), time: { created: 1 } }]),
     {
       type: "synthetic",
       id: "synthetic-1",
       text: "internal context",
+      metadata: { source: "shell", shellID: "sh_user", state: "completed" },
       time: { created: 2 },
     },
     assistant("assistant-2", [{ type: "tool", id: "grep-1", name: "grep", state: pending(), time: { created: 3 } }]),
   ]
 
-  expect(reduceSessionRows(messages)).toEqual([
+  const rows = reduceSessionRows(messages)
+  expect(rows).toEqual([
+    { type: "message", messageID: "shell-message" },
     {
       type: "group",
       kind: "exploration",
@@ -423,6 +439,7 @@ test("hides synthetic messages without descriptions", () => {
       ],
     },
   ])
+  expect(reduceSessionRows(messages, new Set(["synthetic-1"]))).toEqual(rows)
 })
 
 test("renders synthetic messages with descriptions", () => {

@@ -58,6 +58,11 @@ export function host(overrides: Overrides = {}): Plugin.Context {
     event: overrides.event ?? {
       subscribe: () => Stream.empty,
     },
+    experimental: overrides.experimental ?? {
+      terminal: {
+        read: () => Effect.die("unused experimental.terminal.read"),
+      },
+    },
     generate: overrides.generate ?? {
       text: () => Effect.die("unused generate.text"),
     },
@@ -124,6 +129,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       hook: () => Effect.die("unused tool.hook"),
     },
     vcs: overrides.vcs ?? {
+      base: () => Effect.die("unused vcs.base"),
       get: () => Effect.die("unused vcs.get"),
       branches: () => Effect.die("unused vcs.branches"),
       status: () => Effect.die("unused vcs.status"),

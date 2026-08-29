@@ -378,6 +378,14 @@ export type SessionStatus =
 
 export type PtyTicketConnectToken = { ticket: string; expires_in: number }
 
+export type PersistentPtyReadResult = {
+  ptyID: string
+  title: string
+  cwd: string
+  foregroundProcess: string | null
+  screen: { text: string; cols: number; rows: number; cursor: { x: number; y: number } }
+}
+
 export type PersistentPtyHandoff = { directory: string; instanceID: string; ticket: string; expiresAt: number }
 
 export type ShellInfo1 = {
@@ -410,6 +418,8 @@ export type WorktreeInfo = { directory: string }
 export type WorkspaceDestroyResult = { destroyed: boolean }
 
 export type VcsBranch = { current?: string; default?: string }
+
+export type VcsBase = { name: string; ref: string; source: "reflog" | "default" }
 
 export type VcsFileStatus = {
   file: string
@@ -5769,6 +5779,13 @@ export type PtyConnectTokenOutput = {
   data: PtyTicketConnectToken
 }
 
+export type ExperimentalPersistentPtyReadInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly lines?: { readonly lines?: number | undefined }["lines"]
+}
+
+export type ExperimentalPersistentPtyReadOutput = { data: PersistentPtyReadResult | null }["data"]
+
 export type ExperimentalPersistentPtyListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type ExperimentalPersistentPtyListOutput = { data: Array<PersistentPtyInfo> }["data"]
@@ -6058,6 +6075,17 @@ export type VcsGetOutput = {
   data: VcsInfo
 }
 
+export type VcsBaseInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type VcsBaseOutput = {
+  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  data: VcsBase | null
+}
+
 export type VcsStatusInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -6095,17 +6123,26 @@ export type VcsBranchesOutput = {
 export type VcsDiffInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-    readonly mode: "working" | "branch"
+    readonly mode: "working" | "branch" | "committed"
+    readonly base?: string | undefined
     readonly context?: number | undefined
   }["location"]
   readonly mode: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-    readonly mode: "working" | "branch"
+    readonly mode: "working" | "branch" | "committed"
+    readonly base?: string | undefined
     readonly context?: number | undefined
   }["mode"]
+  readonly base?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly mode: "working" | "branch" | "committed"
+    readonly base?: string | undefined
+    readonly context?: number | undefined
+  }["base"]
   readonly context?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-    readonly mode: "working" | "branch"
+    readonly mode: "working" | "branch" | "committed"
+    readonly base?: string | undefined
     readonly context?: number | undefined
   }["context"]
 }

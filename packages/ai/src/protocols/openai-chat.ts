@@ -815,7 +815,12 @@ const mapFinishReason = Effect.fn("OpenAIChat.mapFinishReason")(function* (event
     case "tool_calls":
       return "tool-calls" as const
     default:
-      return "unknown" as const
+      return yield* new AIError({
+        reason: new UnknownProviderError({
+          message: `Provider finish_reason: ${reason}`,
+          body: ProviderShared.encodeJson(event),
+        }),
+      })
   }
 })
 
@@ -1000,33 +1005,12 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       lifecycle = Lifecycle.reasoningStart(lifecycle, events, "reasoning-0", deltaMetadata)
     const reasoningEmitted = state.reasoningEmitted || lifecycle.reasoning.has("reasoning-0")
 
-    if (delta?.content) {
-      lifecycle = Lifecycle.reasoningEnd(
-        lifecycle,
-        events,
-        "reasoning-0",
-        reasoningMetadata(
-          state.providerMetadataKey,
-          reasoningField,
-          reasoningDetailsObserved ? state.reasoningDetails : undefined,
-        ),
-      )
-      lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.content)
-    }
+    // Reasoning is one response-wide channel: it stays open alongside text and
+    // refusal output so late reasoning deltas and details join the same block,
+    // and `finishEvents` closes it once with the complete metadata.
+    if (delta?.content) lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.content)
 
-    if (delta?.refusal) {
-      lifecycle = Lifecycle.reasoningEnd(
-        lifecycle,
-        events,
-        "reasoning-0",
-        reasoningMetadata(
-          state.providerMetadataKey,
-          reasoningField,
-          reasoningDetailsObserved ? state.reasoningDetails : undefined,
-        ),
-      )
-      lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.refusal)
-    }
+    if (delta?.refusal) lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.refusal)
 
     // Compatible providers may omit indexes. Prefer durable identity, then use
     // batch position for parallel deltas or the latest call for sparse chunks.
@@ -1075,17 +1059,25 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       events.push(...result.events)
     }
 
-    if (finishReason !== undefined && state.finishReason === undefined && Object.keys(pendingTools).length > 0)
+    const incompleteTools = finishReason?.normalized === "content-filter" || finishReason?.normalized === "length"
+    if (
+      finishReason !== undefined &&
+      !incompleteTools &&
+      state.finishReason === undefined &&
+      Object.keys(pendingTools).length
+    )
       return yield* ProviderShared.eventError(
         ADAPTER,
         "OpenAI Chat tool call delta is missing id or name",
         ProviderShared.encodeJson(event),
       )
 
-    // Finalize accumulated tool inputs eagerly when finish_reason arrives so
-    // valid calls and malformed local calls settle independently.
+    // Filtering or truncation terminates the response without confirming pending tool calls.
     const finished =
-      finishReason !== undefined && state.finishReason === undefined && Object.keys(tools).length > 0
+      finishReason !== undefined &&
+      !incompleteTools &&
+      state.finishReason === undefined &&
+      Object.keys(tools).length > 0
         ? yield* ToolStream.finishAll(ADAPTER, tools)
         : undefined
 
@@ -1132,10 +1124,12 @@ const finishEvents = Effect.fn("OpenAIChat.finishEvents")(function* (state: Pars
           state.finishReason.normalized === "stop" && hasToolCalls ? "tool-calls" : state.finishReason.normalized,
       }
     : { normalized: hasToolCalls ? ("tool-calls" as const) : ("stop" as const) }
+  // Snapshot details at publish time so the emitted event never observes later
+  // mutation of the accumulated `reasoningDetails` array.
   const metadata = reasoningMetadata(
     state.providerMetadataKey,
     state.reasoningField,
-    state.reasoningDetailsObserved ? state.reasoningDetails : undefined,
+    state.reasoningDetailsObserved ? [...state.reasoningDetails] : undefined,
   )
   const started =
     state.reasoningDetailsObserved && !state.reasoningEmitted

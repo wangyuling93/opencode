@@ -1,5 +1,7 @@
 /// <reference types="@solidjs/start/env" />
 
+import "@solidjs/start"
+
 declare module "solid-js/web" {
   interface RequestEvent {
     locals: Record<string | number | symbol, any>
