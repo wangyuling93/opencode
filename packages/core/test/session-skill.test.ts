@@ -24,6 +24,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { Skill } from "@opencode-ai/core/skill"
+import { Reference } from "@opencode-ai/core/reference"
 import { Event } from "@opencode-ai/schema/event"
 import { testEffect } from "./lib/effect"
 import { globalProjectNode } from "./lib/project"
@@ -51,7 +52,10 @@ const locations = makeGlobalNode({
               get: (id) => Effect.succeed(id === info.id ? info : undefined),
               list: () => Effect.succeed([info]),
             }),
-            Layer.succeed(PluginSupervisor.Service, { flush: Effect.void }),
+            Layer.succeed(PluginSupervisor.Service, {
+              flush: Effect.void,
+            }),
+            Layer.mock(Reference.Service, { refresh: () => Effect.void }),
           ),
         ),
       )
@@ -69,9 +73,9 @@ const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),
     [
-      [LocationServiceMap.node, locations],
-      [Project.node, globalProjectNode],
-      [SessionExecution.node, SessionExecution.noopLayer],
+      LocationServiceMap.node.replace(locations),
+      Project.node.replace(globalProjectNode),
+      SessionExecution.node.replace(SessionExecution.noopLayer),
     ],
   ),
 )
