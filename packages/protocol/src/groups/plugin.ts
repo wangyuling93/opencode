@@ -21,9 +21,25 @@ export const PluginGroup = HttpApiGroup.make("server.plugin")
       ),
   )
   .add(
+    HttpApiEndpoint.post("plugin.check", "/api/plugin/check", {
+      query: LocationQuery,
+      payload: Schema.Struct({ target: Schema.String.pipe(Schema.optional) }),
+      success: Location.response(Schema.Array(Plugin.Info)),
+      error: InvalidRequestError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.plugin.check",
+          summary: "Check plugin updates",
+          description: "Check one or all package plugins for available updates.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.post("plugin.update", "/api/plugin/update", {
       query: LocationQuery,
-      payload: Schema.Struct({ target: Schema.String }),
+      payload: Schema.Struct({ targets: Schema.Array(Schema.String) }),
       success: HttpApiSchema.NoContent,
       error: [InvalidRequestError, ServiceUnavailableError],
     })
@@ -31,8 +47,9 @@ export const PluginGroup = HttpApiGroup.make("server.plugin")
       .annotateMerge(
         OpenApi.annotations({
           identifier: "v2.plugin.update",
-          summary: "Update plugin",
-          description: "Update one package plugin and notify active locations to reload it.",
+          summary: "Update plugins",
+          description:
+            "Update package plugins concurrently and notify active locations to reload them. Responds once every update has finished; fails when any update fails.",
         }),
       ),
   )

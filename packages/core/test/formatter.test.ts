@@ -6,7 +6,7 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Bus } from "@opencode-ai/core/bus"
 import { Database } from "@opencode-ai/core/database/database"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
-import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
+import { Plugin } from "@opencode-ai/core/plugin"
 import { SdkPlugins } from "@opencode-ai/core/plugin/sdk"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Info } from "@opencode-ai/schema/config"
@@ -43,8 +43,8 @@ function withFormatter<A, E, R>(
     ).pipe(
       Effect.andThen(
         Effect.gen(function* () {
-          const plugins = yield* PluginSupervisor.Service
-          yield* plugins.flush
+          const plugins = yield* Plugin.Service
+          yield* plugins.awaitActivation
           return yield* body(yield* Formatter.Service, directory)
         }).pipe(
           Effect.scoped,

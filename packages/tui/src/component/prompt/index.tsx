@@ -1596,8 +1596,11 @@ export function Prompt(props: PromptProps) {
   })
   // Shared with the agent label so outline and mode chrome stay in sync.
   const outlineColor = createMemo(() => fadeColor(highlight(), agentMetaAlpha()))
-
-  const footerInput = () => ({ sessionID: props.sessionID, mode: store.mode })
+  const footerInput = () => ({
+    sessionID: props.sessionID,
+    mode: store.mode,
+    showDetails: store.interrupt === 0 || dimensions().width >= 80,
+  })
 
   const placeholderText = createMemo(() => {
     if (props.showPlaceholder === false) return undefined

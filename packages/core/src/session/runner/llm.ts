@@ -23,7 +23,7 @@ import { StepFailedError } from "../error.js"
 import { SessionRunnerRetry } from "./retry.js"
 import { SessionStep } from "./step.js"
 import { ToolOutput } from "../../tool-output.js"
-import { PluginSupervisor } from "../../plugin/supervisor.js"
+import { Plugin } from "../../plugin.js"
 import { MAX_STEPS_PROMPT } from "./max-steps.js"
 
 const CONTINUE_AFTER_INCOMPLETE_STREAM =
@@ -38,7 +38,7 @@ const layer = Layer.effect(
     const modelTransport = yield* SessionModelTransport.Service
     const db = (yield* Database.Service).db
     const compaction = yield* SessionCompaction.Service
-    const plugins = yield* PluginSupervisor.Service
+    const plugins = yield* Plugin.Service
     const title = yield* SessionTitle.Service
     const steps = yield* SessionStep.make
     // Title generation starts once input is visible and must not delay model execution.
@@ -57,7 +57,7 @@ const layer = Layer.effect(
         const control = pending.type === "compaction" || pending.type === "move"
         if (promotable === "steer" && pending.delivery === "queue" && !control) return DrainResult.Complete()
       }
-      yield* plugins.flush
+      yield* plugins.awaitActivation
       yield* settleStaleToolCalls(sessionID)
 
       const advanceToStep = Effect.fn("SessionRunner.advanceToStep")(() =>
@@ -185,7 +185,7 @@ const layer = Layer.effect(
           resolved: loaded.model,
           prepare: context.prepare,
         }
-        if (compaction.required(compactionInput)) {
+        if (compaction.required({ ...compactionInput, context: loaded })) {
           const compacted = yield* compaction.compact(compactionInput)
           if (compacted.status !== "completed") return yield* new StepFailedError({ error: compacted.error })
           assistantMessageID = SessionMessage.ID.create()
@@ -301,7 +301,7 @@ export const node = makeLocationNode({
     SessionModelTransport.node,
     SessionStore.node,
     SessionCompaction.node,
-    PluginSupervisor.node,
+    Plugin.node,
     SessionTitle.node,
     Snapshot.node,
     ToolOutput.node,

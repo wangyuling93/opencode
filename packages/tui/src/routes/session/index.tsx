@@ -155,6 +155,7 @@ function use() {
 }
 
 export function Session(props: {
+  scrollRef?: (scroll: ScrollBoxRenderable | undefined) => void
   verticalTabsWidth: number
   promptMuted?: boolean
   sidebarVisible: boolean
@@ -377,6 +378,7 @@ export function Session(props: {
   let awayTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => {
     if (awayTimer) clearTimeout(awayTimer)
+    props.scrollRef?.(undefined)
     prependHistory.cancel()
     firstJump()?.()
     if (!scroll || scroll.isDestroyed) return
@@ -1371,6 +1373,7 @@ export function Session(props: {
               <scrollbox
                 ref={(r) => {
                   scroll = r
+                  props.scrollRef?.(r)
                   scroll.verticalScrollBar.on("change", updateAwayFromBottom)
                 }}
                 viewportOptions={{
@@ -3087,11 +3090,13 @@ function StatusBadge(props: { children: string }) {
 type BlockToolProps = {
   title?: string
   path?: { label: string; value: string }
+  headerColor?: RGBA
   children?: JSX.Element
   onClick?: () => void
   part?: SessionMessageAssistantTool
   spinner?: boolean
   error?: string
+  errorColor?: RGBA
 }
 
 function BlockTool(props: BlockToolProps) {
@@ -3137,7 +3142,11 @@ function BlockToolContent(props: BlockToolProps & { borderColor: RGBA }) {
               <Show
                 when={props.spinner}
                 fallback={
-                  <text fg={permission() ? theme.text.feedback.warning.default : theme.text.subdued}>{title()}</text>
+                  <text
+                    fg={permission() ? theme.text.feedback.warning.default : (props.headerColor ?? theme.text.subdued)}
+                  >
+                    {title()}
+                  </text>
                 }
               >
                 <Spinner color={permission() ? theme.text.feedback.warning.default : theme.text.subdued}>
@@ -3153,7 +3162,10 @@ function BlockToolContent(props: BlockToolProps & { borderColor: RGBA }) {
             <Show
               when={props.spinner}
               fallback={
-                <text flexShrink={0} fg={permission() ? theme.text.feedback.warning.default : theme.text.subdued}>
+                <text
+                  flexShrink={0}
+                  fg={permission() ? theme.text.feedback.warning.default : (props.headerColor ?? theme.text.subdued)}
+                >
                   {path().label}
                 </text>
               }
@@ -3165,14 +3177,14 @@ function BlockToolContent(props: BlockToolProps & { borderColor: RGBA }) {
             <FilePath
               value={path().value}
               maxWidth={Math.max(2, ctx.width - 4 - stringWidth(path().label) - (props.spinner ? 2 : 0))}
-              fg={permission() ? theme.text.feedback.warning.default : theme.text.subdued}
+              fg={permission() ? theme.text.feedback.warning.default : (props.headerColor ?? theme.text.subdued)}
             />
           </box>
         )}
       </Show>
       {props.children}
       <Show when={error()}>
-        <text fg={theme.text.feedback.error.default}>{error()}</text>
+        <text fg={props.errorColor ?? theme.text.feedback.error.default}>{error()}</text>
       </Show>
     </box>
   )
@@ -3777,6 +3789,8 @@ function ApplyPatch(props: ToolProps) {
           }
           part={props.part}
           spinner={props.part.state.status === "streaming" || props.part.state.status === "running"}
+          headerColor={props.part.state.status === "error" ? theme.text.feedback.error.default : undefined}
+          errorColor={props.part.state.status === "error" ? theme.text.subdued : undefined}
         />
       </Match>
     </Switch>
