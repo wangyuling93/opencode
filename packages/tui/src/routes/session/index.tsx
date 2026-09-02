@@ -1421,7 +1421,7 @@ export function Session(props: {
             </box>
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
               <Show when={firstJump()}>
-                <text fg={theme.text.feedback.info.default}>Loading session history...</text>
+                <text fg={theme.text.feedback.info.default}>Loading session history…</text>
               </Show>
               <Show when={!firstJump() && awayFromBottom()}>
                 <box
@@ -1621,12 +1621,11 @@ function TurnTokenUsage(props: {
   }))
   const summary = createMemo(() => {
     const items = steps()
-    const last = items[items.length - 1]
     return {
       count: items.length,
       newTokens: items.reduce((sum, item) => sum + item.newTokens, 0),
-      cached: last?.cached ?? 0,
-      total: last?.total ?? 0,
+      cached: items.reduce((sum, item) => sum + item.cached, 0),
+      total: items.reduce((sum, item) => sum + item.total, 0),
       reuseDrops: items.filter((item) => item.reuseDrop !== undefined).length,
     }
   })
