@@ -56,7 +56,7 @@ List files and directories that are important to the conversation. Include paths
 - \`[exact path]\`: [why it matters]
 
 ## Additional Context
-- [important facts, assumptions, unresolved questions, exact references, or other context needed to continue that does not fit above; when uncertain, preserve it here, or "(none)"]
+- [facts or references needed to continue the work that are not captured above; omit this section if none]
 </template>`
 
 const SUMMARY_RULES = `Rules:
@@ -75,7 +75,7 @@ export type Settings = {
   tokens: number
 }
 
-export type Draft = {
+export type Editor = {
   configure: (settings: Partial<Settings>) => void
 }
 
@@ -116,7 +116,7 @@ export type Outcome =
   | Pick<SessionMessage.CompactionCompleted, "status">
   | Pick<SessionMessage.CompactionFailed, "status" | "error">
 
-export interface Interface extends State.Transformable<Draft> {
+export interface Interface extends State.Transformable<Editor> {
   readonly enabled: () => boolean
   readonly required: (input: RequiredInput) => boolean
   readonly compact: (input: AutoInput) => Effect.Effect<Outcome>
@@ -173,6 +173,8 @@ const estimateMedia = (mime: string) => {
 }
 
 const estimatePart = (part: ContentPart): number => {
+  // Encrypted checkpoints have no locally measurable token size.
+  if (part.type === "compaction") return Token.estimate(part.text ?? "")
   if (part.type === "text" || part.type === "reasoning") return Token.estimate(part.text)
   if (part.type === "media") return estimateMedia(part.mediaType)
   if (part.type === "tool-call") return Token.estimate(part.name + (JSON.stringify(part.input) ?? ""))
@@ -324,14 +326,14 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const llm = yield* LLMClient.Service
 
-    const state = State.create<Settings, Draft>({
+    const state = State.create<Settings, Editor>({
       name: "session-compaction",
       initial: () => ({ auto: true, buffer: DEFAULT_BUFFER, tokens: DEFAULT_KEEP_TOKENS }),
-      draft: (draft) => ({
+      editor: (editor) => ({
         configure: (settings) => {
-          if (settings.auto !== undefined) draft.auto = settings.auto
-          if (settings.buffer !== undefined) draft.buffer = settings.buffer
-          if (settings.tokens !== undefined) draft.tokens = settings.tokens
+          if (settings.auto !== undefined) editor.auto = settings.auto
+          if (settings.buffer !== undefined) editor.buffer = settings.buffer
+          if (settings.tokens !== undefined) editor.tokens = settings.tokens
         },
       }),
     })
