@@ -103,6 +103,7 @@ export const Definitions = {
 
   "session.export": keybind("<leader>x", "Export session to editor"),
   "session.copy": keybind("none", "Copy session transcript"),
+  "session.copy.id": keybind("none", "Copy session ID"),
   "session.move": keybind("none", "Move session"),
   "session.new": keybind("<leader>n", "Create a new session"),
   "session.list": keybind("<leader>l", "List all sessions"),
@@ -243,6 +244,7 @@ export const Definitions = {
   "composer.subagent.interrupt": keybind("ctrl+d", "Interrupt subagent"),
   "composer.shell.up": keybind("up", "Previous shell"),
   "composer.shell.down": keybind("down", "Next shell"),
+  "composer.shell.select": keybind("return", "View shell output"),
   "composer.shell.kill": keybind("ctrl+d", "Kill shell command"),
   "composer.terminal.up": keybind("up,k", "Previous terminal"),
   "composer.terminal.down": keybind("down,j", "Next terminal"),

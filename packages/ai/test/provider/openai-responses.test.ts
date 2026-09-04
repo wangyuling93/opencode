@@ -2850,7 +2850,7 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("ignores duplicate item boundary events", () =>
+  it.effect("ignores duplicate item start events", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(
         Effect.provide(
@@ -2860,7 +2860,6 @@ describe("OpenAI Responses route", () => {
               // Duplicate added for a known item is not overlap and must no-op.
               { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
               { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 0, delta: "Think" },
-              { type: "response.output_item.done", item: { type: "reasoning", id: "rs_1" } },
               { type: "response.output_item.done", item: { type: "reasoning", id: "rs_1" } },
               {
                 type: "response.output_item.added",
@@ -2880,21 +2879,6 @@ describe("OpenAI Responses route", () => {
                   name: "lookup",
                   arguments: '{"query":"weather"}',
                 },
-              },
-              {
-                type: "response.output_item.done",
-                item: {
-                  type: "function_call",
-                  id: "fc_1",
-                  call_id: "call_1",
-                  name: "lookup",
-                  arguments: '{"query":"weather"}',
-                },
-              },
-              // A completed item that is re-added stays closed.
-              {
-                type: "response.output_item.added",
-                item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "lookup", arguments: "" },
               },
               { type: "response.completed", response: { id: "resp_1" } },
             ),

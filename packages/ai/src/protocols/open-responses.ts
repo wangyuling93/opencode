@@ -423,21 +423,16 @@ export interface ParserState {
   readonly name: string
   readonly providerMetadataKey: string
   readonly tools: ToolStream.State<string>
-  // Item ids are response-scoped identities. Keep completed ids tombstoned so
-  // reconnect replay cannot reopen fragments already emitted downstream.
-  readonly completedTools: ReadonlySet<string>
   readonly hasFunctionCall: boolean
   readonly lifecycle: Lifecycle.State
   readonly outputItems: Readonly<Record<number, string>>
   readonly message: { readonly id: string; readonly phase: MessagePhase | null | undefined } | undefined
-  readonly completedMessages: ReadonlySet<string>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
 }
 
 type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
 
 interface ReasoningStreamItem {
-  readonly open: boolean
   readonly encryptedContent: string | null | undefined
   // Keyed by the wire protocol's numeric `summary_index`. JS object keys coerce to
   // strings, but typing the map as `Record<number, ...>` documents intent
@@ -954,7 +949,7 @@ export const normalize = (state: ParserState, input: Event): NormalizedEvent => 
 
 const startReasoningSummaryPart = (state: ParserState, itemID: string, index: number): StepResult => {
   const item = state.reasoningItems[itemID]
-  if (!item?.open || index === 0 || item.summaryParts[index] !== undefined) return [state, NO_EVENTS]
+  if (!item || index === 0 || item.summaryParts[index] !== undefined) return [state, NO_EVENTS]
 
   const events: LLMEvent[] = []
   const lifecycle = Object.entries(item.summaryParts)
@@ -994,7 +989,7 @@ const startReasoningSummaryPart = (state: ParserState, itemID: string, index: nu
 
 export const onReasoningDelta = (state: ParserState, event: Event, itemID: string): StepResult => {
   const item = state.reasoningItems[itemID]
-  if (!event.delta || !item?.open) return [state, NO_EVENTS]
+  if (!event.delta || !item) return [state, NO_EVENTS]
   const index = event.summary_index ?? 0
   if (item.summaryParts[index] === "concluded") return [state, NO_EVENTS]
   const [started, emitted] = startReasoningSummaryPart(state, itemID, index)
@@ -1019,7 +1014,7 @@ export const onReasoningDelta = (state: ParserState, event: Event, itemID: strin
 // as a single delta unless that summary index already streamed one.
 export const onReasoningDone = (state: ParserState, event: Event, itemID: string): StepResult => {
   const item = state.reasoningItems[itemID]
-  if (!item?.open || typeof event.text !== "string") return [state, NO_EVENTS]
+  if (!item || typeof event.text !== "string") return [state, NO_EVENTS]
   const index = event.summary_index ?? 0
   if (item.deltaIndexes.has(index)) return [state, NO_EVENTS]
   return onReasoningDelta(state, { ...event, delta: event.text }, itemID)
@@ -1042,16 +1037,12 @@ const onOutputItemAdded = (state: ParserState, event: NormalizedEvent): StepResu
   const item = event.item
   if (!item) return [state, NO_EVENTS]
   if (item.type === "message") {
-    if (state.completedMessages.has(item.id)) return [state, NO_EVENTS]
     const phase = messagePhase(item.phase)
-    const completedMessages = new Set(state.completedMessages)
-    if (state.message !== undefined && state.message.id !== item.id) completedMessages.add(state.message.id)
     // A new message closes earlier messages, including ones that never streamed.
     const events: LLMEvent[] = []
     const lifecycle = [...state.lifecycle.text]
       .filter((id) => id !== item.id)
       .reduce((lifecycle, id) => {
-        completedMessages.add(id)
         const openPhase = state.message?.id === id ? state.message.phase : undefined
         return Lifecycle.textEnd(
           lifecycle,
@@ -1064,7 +1055,6 @@ const onOutputItemAdded = (state: ParserState, event: NormalizedEvent): StepResu
       {
         ...state,
         lifecycle,
-        completedMessages,
         message: {
           id: item.id,
           phase: phase === undefined && state.message?.id === item.id ? state.message.phase : phase,
@@ -1083,7 +1073,6 @@ const onOutputItemAdded = (state: ParserState, event: NormalizedEvent): StepResu
         reasoningItems: {
           ...state.reasoningItems,
           [item.id]: {
-            open: true,
             encryptedContent: item.encrypted_content,
             summaryParts: { 0: "active" },
             deltaIndexes: new Set(),
@@ -1094,7 +1083,7 @@ const onOutputItemAdded = (state: ParserState, event: NormalizedEvent): StepResu
     ]
   }
   if (item.type !== "function_call" || !item.call_id) return [state, NO_EVENTS]
-  if (state.tools[item.id] !== undefined || state.completedTools.has(item.id)) return [state, NO_EVENTS]
+  if (state.tools[item.id] !== undefined) return [state, NO_EVENTS]
   const metadata = providerMetadata(state, { itemId: item.id })
   const events: LLMEvent[] = []
   const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
@@ -1121,7 +1110,7 @@ const onReasoningSummaryPartAdded = (state: ParserState, event: Event): StepResu
 const onReasoningSummaryPartDone = (state: ParserState, event: Event): StepResult => {
   if (event.item_id === undefined || event.summary_index === undefined) return [state, NO_EVENTS]
   const item = state.reasoningItems[event.item_id]
-  if (!item?.open) return [state, NO_EVENTS]
+  if (!item) return [state, NO_EVENTS]
   if (item.summaryParts[event.summary_index] !== "active") return [state, NO_EVENTS]
   return [
     {
@@ -1198,14 +1187,9 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   }
 
   if (item.type === "message") {
-    if (state.completedMessages.has(item.id)) return [state, NO_EVENTS] satisfies StepResult
-    const completedMessages = new Set(state.completedMessages)
-    completedMessages.add(item.id)
-    if (state.message !== undefined && state.message.id !== item.id)
-      return [{ ...state, completedMessages }, NO_EVENTS] satisfies StepResult
-    const message = state.message
+    const active = state.message?.id === item.id
     const itemPhase = messagePhase(item.phase)
-    const phase = itemPhase === undefined ? message?.phase : itemPhase
+    const phase = itemPhase === undefined && active ? state.message?.phase : itemPhase
     const parts: ReadonlyArray<unknown> = Array.isArray(item.content) ? item.content : []
     const content: string[] = []
     for (const part of parts) {
@@ -1221,8 +1205,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
       {
         ...state,
         lifecycle: Lifecycle.textEnd(lifecycle, events, item.id, metadata, text),
-        completedMessages,
-        message: undefined,
+        message: active ? undefined : state.message,
       },
       events,
     ] satisfies StepResult
@@ -1230,7 +1213,6 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
 
   if (item.type === "function_call") {
     if (!item.call_id || !item.name) return [state, NO_EVENTS] satisfies StepResult
-    if (state.completedTools.has(item.id)) return [state, NO_EVENTS] satisfies StepResult
     const metadata = providerMetadata(state, { itemId: item.id })
     const registered = state.tools[item.id] !== undefined
     const tools = registered
@@ -1257,14 +1239,12 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
           resultEvents.some((event) => LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputError(event)) ||
           state.hasFunctionCall,
         tools: result.tools,
-        completedTools: new Set([...state.completedTools, item.id]),
       },
       events,
     ] satisfies StepResult
   }
 
   if (item.type === "reasoning") {
-    if (state.reasoningItems[item.id]?.open === false) return [state, NO_EVENTS] satisfies StepResult
     const metadata = reasoningMetadata(state, item)
     const summaryParts: ReadonlyArray<unknown> = Array.isArray(item.summary) ? item.summary : []
     const summary: Array<string | undefined> = []
@@ -1291,53 +1271,14 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
         const finalText = fragments.length === 1 ? itemText : summary[Number(index)]
         lifecycle = Lifecycle.reasoningEnd(lifecycle, events, `${item.id}:${index}`, metadata, finalText || undefined)
       }
-      return [
-        {
-          ...state,
-          lifecycle,
-          reasoningItems: {
-            ...state.reasoningItems,
-            [item.id]: {
-              ...reasoningItem,
-              open: false,
-              encryptedContent: item.encrypted_content ?? reasoningItem.encryptedContent,
-            },
-          },
-        },
-        events,
-      ] satisfies StepResult
+      const reasoningItems = { ...state.reasoningItems }
+      delete reasoningItems[item.id]
+      return [{ ...state, lifecycle, reasoningItems }, events] satisfies StepResult
     }
-    if (!state.lifecycle.reasoning.has(item.id)) {
-      const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
-      events.push(LLMEvent.reasoningStart({ id: item.id, providerMetadata: metadata }))
-      events.push(
-        LLMEvent.reasoningEnd({
-          id: item.id,
-          providerMetadata: metadata,
-          text: itemText,
-        }),
-      )
-      return [
-        {
-          ...state,
-          lifecycle,
-          reasoningItems: {
-            ...state.reasoningItems,
-            [item.id]: {
-              open: false,
-              encryptedContent: item.encrypted_content,
-              summaryParts: { 0: "concluded" },
-              deltaIndexes: new Set(),
-            },
-          },
-        },
-        events,
-      ] satisfies StepResult
-    }
-    return [
-      { ...state, lifecycle: Lifecycle.reasoningEnd(state.lifecycle, events, item.id, metadata) },
-      events,
-    ] satisfies StepResult
+    const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
+    events.push(LLMEvent.reasoningStart({ id: item.id, providerMetadata: metadata }))
+    events.push(LLMEvent.reasoningEnd({ id: item.id, providerMetadata: metadata, text: itemText }))
+    return [{ ...state, lifecycle }, events] satisfies StepResult
   }
 
   return [state, NO_EVENTS] satisfies StepResult
@@ -1518,11 +1459,9 @@ export const initial = (request: LLMRequest, adapter: ProviderAdapter = BASE_ADA
   providerMetadataKey: metadataKey(request.model),
   hasFunctionCall: false,
   tools: ToolStream.empty<string>(),
-  completedTools: new Set<string>(),
   lifecycle: Lifecycle.initial(),
   outputItems: {},
   message: undefined,
-  completedMessages: new Set<string>(),
   reasoningItems: {},
 })
 
