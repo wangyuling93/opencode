@@ -79,6 +79,7 @@ import { WebSearchTool } from "../tool/plugin/websearch.js"
 import { WellKnown } from "../wellknown.js"
 import { WriteTool } from "../tool/plugin/write.js"
 import { AgentPlugin } from "./agent.js"
+import BrowserPlugin from "@opencode-ai/plugin-browser"
 import { CommandPlugin } from "./command.js"
 import { PlanPlugin } from "./plan.js"
 import { ModelsDevPlugin } from "./models-dev.js"
@@ -87,7 +88,7 @@ import { ProviderPlugins } from "./provider.js"
 import { WebSearchPlugins } from "./websearch/index.js"
 import { SkillPlugin } from "./skill.js"
 import { VcsHgPlugin } from "./vcs/hg.js"
-import { SystemPromptPlugin } from "./system-prompt.js"
+import { OptimizePlugin } from "./optimize.js"
 import { VariantPlugin } from "./variant.js"
 import { VcsGitPlugin } from "./vcs/git.js"
 import { WarmingPlugin } from "./warming.js"
@@ -192,6 +193,7 @@ export const requirements = LayerNode.group([
 export type InternalPlugin = Plugin<Requirements | Scope.Scope>
 
 const pre = [
+  BrowserPlugin,
   ConfigMcpPlugin.Plugin,
   McpCodeModeExclusionPlugin.Plugin,
   WellKnownPlugin.Plugin,
@@ -201,11 +203,12 @@ const pre = [
   CommandPlugin.Plugin,
   SkillPlugin.Plugin,
   VcsHgPlugin.Plugin,
-  ...SystemPromptPlugin.Plugins,
   ModelsDevPlugin,
   ...ProviderPlugins,
   ...WebSearchPlugins,
   PatchTool.Plugin,
+  // Render model prompts after the patch plugin selects the available editing tools.
+  ...OptimizePlugin.Plugins,
   EditTool.Plugin,
   GlobTool.Plugin,
   GrepTool.Plugin,
