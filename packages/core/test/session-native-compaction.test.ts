@@ -1,29 +1,29 @@
 import { expect, test } from "bun:test"
-import { LLMClient, LanguageModel, Message, ToolDefinition } from "@opencode-ai/ai"
-import { OpenAI } from "@opencode-ai/ai/providers"
-import { Agent } from "@opencode-ai/core/agent"
-import { Bus } from "@opencode-ai/core/bus"
-import { Database } from "@opencode-ai/core/database/database"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { llmClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Instructions } from "@opencode-ai/core/instructions/index"
-import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
-import { Project } from "@opencode-ai/core/project"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { SessionCompaction } from "@opencode-ai/core/session/compaction"
-import { SessionEvent } from "@opencode-ai/core/session/event"
-import { SessionHistory } from "@opencode-ai/core/session/history"
-import { SessionInbox } from "@opencode-ai/core/session/inbox"
-import { InstructionState } from "@opencode-ai/core/session/instruction-state"
-import { SessionMessage } from "@opencode-ai/core/session/message"
-import { SessionModelRequest } from "@opencode-ai/core/session/model-request"
-import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { SessionProviderContext } from "@opencode-ai/core/session/provider-context"
-import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
-import { SessionSchema } from "@opencode-ai/core/session/schema"
-import { SessionStore } from "@opencode-ai/core/session/store"
-import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { LLMClient, LanguageModel, Message, ToolDefinition } from "@opencode/ai"
+import { OpenAI } from "@opencode/ai/providers"
+import { Agent } from "@opencode/core/agent"
+import { Bus } from "@opencode/core/bus"
+import { Database } from "@opencode/core/database/database"
+import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { llmClient } from "@opencode/core/effect/app-node-platform"
+import { Instructions } from "@opencode/core/instructions/index"
+import { PluginHooks } from "@opencode/core/plugin/hooks"
+import { Project } from "@opencode/core/project"
+import { ProjectTable } from "@opencode/core/project/sql"
+import { AbsolutePath } from "@opencode/core/schema"
+import { SessionCompaction } from "@opencode/core/session/compaction"
+import { SessionEvent } from "@opencode/core/session/event"
+import { SessionHistory } from "@opencode/core/session/history"
+import { SessionInbox } from "@opencode/core/session/inbox"
+import { InstructionState } from "@opencode/core/session/instruction-state"
+import { SessionMessage } from "@opencode/core/session/message"
+import { SessionModelRequest } from "@opencode/core/session/model-request"
+import { SessionProjector } from "@opencode/core/session/projector"
+import { SessionProviderContext } from "@opencode/core/session/provider-context"
+import { SessionRunnerModel } from "@opencode/core/session/runner/model"
+import { SessionSchema } from "@opencode/core/session/schema"
+import { SessionStore } from "@opencode/core/session/store"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { DateTime, Deferred, Effect, Fiber, Schema } from "effect"
 import { testEffect } from "./lib/effect"
 
@@ -54,7 +54,7 @@ const setup = Effect.fnUntraced(function* (endpoint = false) {
   const hooks = yield* PluginHooks.Service
   const blocked = Deferred.makeUnsafe<void>()
   const hanging = Promise.withResolvers<Response>()
-  const state = { failure: false, hang: false, overflow: false, localFailure: false, calls: 0 }
+  const state = { failure: false, flaky: false, hang: false, overflow: false, localFailure: false, calls: 0 }
   const bodies: Record<string, unknown>[] = []
   const headers: Headers[] = []
   const server = yield* Effect.acquireRelease(
@@ -74,11 +74,15 @@ const setup = Effect.fnUntraced(function* (endpoint = false) {
             Deferred.doneUnsafe(blocked, Effect.void)
             return hanging.promise
           }
-          if (state.failure)
+          // Persistent failures opt out of retries so the schedule's backoff stays out of these tests.
+          if (state.failure || state.flaky) {
+            const retry = state.flaky
+            state.flaky = false
             return Response.json(
               { error: { message: "fixture rate limit", type: "rate_limit_error" } },
-              { status: 429 },
+              { status: 429, headers: retry ? {} : { "x-should-retry": "false" } },
             )
+          }
           const trigger = JSON.stringify(bodies.at(-1)).includes("compaction_trigger")
           if (state.overflow && (trigger || state.localFailure))
             return Response.json(
@@ -304,12 +308,36 @@ it.live(
       expect(yield* fixture.compact).toMatchObject({ status: "failed", error: { type: "provider.rate-limit" } })
       expect(fixture.state.calls).toBe(4)
       expect(yield* fixture.checkpoint).toEqual(second)
+      fixture.state.failure = false
       fixture.state.hang = true
       const pending = yield* fixture.compact.pipe(Effect.forkScoped)
       yield* Deferred.await(fixture.blocked)
       yield* Fiber.interrupt(pending)
       expect(fixture.state.calls).toBe(5)
       expect(yield* fixture.checkpoint).toEqual(second)
+      // A transient provider failure retries under the shared session policy and its plugin hook.
+      fixture.state.hang = false
+      const retries: PluginHooks.Domains["session"]["retry"][] = []
+      yield* fixture.hooks.register("session", "retry", (event) =>
+        Effect.sync(() => {
+          retries.push(event)
+          event.decision = { retry: true, delay: 0 }
+        }),
+      )
+      fixture.state.flaky = true
+      expect(yield* fixture.compact).toEqual({ status: "completed" })
+      expect(fixture.state.calls).toBe(7)
+      expect(retries).toMatchObject([
+        {
+          agent: "compaction",
+          attempt: 2,
+          error: { type: "provider.rate-limit" },
+          decision: { retry: true, delay: 0 },
+        },
+      ])
+      expect(
+        SessionProviderContext.decode(yield* fixture.checkpoint).filter((message) => message.role === "user"),
+      ).toHaveLength(3)
     }),
   15000,
 )

@@ -1,5 +1,5 @@
 import { RGBA } from "@opentui/core"
-import type { ResolvedTheme, ResolvedThemeTokens } from "@opencode-ai/theme/tui"
+import type { ResolvedTheme, ResolvedThemeTokens } from "@opencode/theme/tui"
 
 function clearAlpha(color: RGBA) {
   return RGBA.fromValues(color.r, color.g, color.b, 0)
