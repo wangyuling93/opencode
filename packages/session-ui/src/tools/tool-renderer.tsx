@@ -51,6 +51,7 @@ import {
   executeToolFailed,
 } from "../message/current-tool-state"
 import { AssistantReasoningContent, writeClipboard } from "../message/message-content"
+import { followShellOutput } from "./shell-output"
 
 function ShellSubmessage(props: { text: string; animate?: boolean }) {
   let widthRef: HTMLSpanElement | undefined
@@ -515,22 +516,21 @@ export function CurrentContextToolGroup(props: {
   )
   const names = createMemo(() =>
     [
-      ...props.parts.reduce((counts, part) => {
-        if (part.type !== "tool" && part.type !== "shell") return counts
-        const name =
-          part.type !== "tool"
-            ? i18n.t("ui.tool.shell")
-            : part.name === "skill"
-              ? i18n.t("ui.tool.skill")
-              : part.name === "subagent"
-                ? i18n.t("ui.tool.agent.default")
-                : getToolInfo(part.name, currentToolInput(part), currentToolMetadata(part)).title
-        counts.set(name, (counts.get(name) ?? 0) + 1)
-        return counts
-      }, new Map<string, number>()),
-    ]
-      .map(([name, count]) => `${count} ${name}`)
-      .join(", "),
+      ...new Set(
+        props.parts.flatMap((part) => {
+          if (part.type !== "tool" && part.type !== "shell") return []
+          return [
+            part.type !== "tool"
+              ? i18n.t("ui.tool.shell")
+              : part.name === "skill"
+                ? i18n.t("ui.tool.skill")
+                : part.name === "subagent"
+                  ? i18n.t("ui.tool.agent.default")
+                  : getToolInfo(part.name, currentToolInput(part), currentToolMetadata(part)).title,
+          ]
+        }),
+      ),
+    ].join(", "),
   )
   const label = createMemo(() => {
     const thoughts = props.parts.filter((part) => part.type === "reasoning").length
@@ -539,7 +539,8 @@ export function CurrentContextToolGroup(props: {
       return { text: title, title, before: "", after: "" }
     }
     const title = names() || i18n.plural("ui.messagePart.context.thought", thoughts)
-    const text = i18n.t("ui.messagePart.tools.used", { tools: title })
+    const count = props.parts.filter((part) => part.type === "tool" || part.type === "shell").length || thoughts
+    const text = i18n.plural("ui.messagePart.tools.used", count, { tools: title })
     const index = text.indexOf(title)
     return { text, title, before: text.slice(0, index).trim(), after: text.slice(index + title.length).trim() }
   })
@@ -1629,33 +1630,9 @@ ToolRegistry.register({
     createEffect(() => {
       if (saved() !== undefined) return
       const id = props.metadata.shellID
-      const shellOutput = data.shellOutput
-      if (typeof id !== "string" || !shellOutput) return
-      const directory = data.directory
-      const running = pending()
-      let cursor = 0
-      let loading = false
-      let disposed = false
-      const load = async () => {
-        if (loading) return
-        loading = true
-        do {
-          const response = await shellOutput({ id, location: { directory }, cursor }).catch(() => undefined)
-          if (disposed || !response) break
-          setStreamed((output) => (cursor === 0 ? response.data.output : output + response.data.output))
-          if (response.data.cursor <= cursor) break
-          cursor = response.data.cursor
-          if (running || cursor >= response.data.size) break
-        } while (!disposed)
-        loading = false
-      }
-      void load()
-      // Refresh the final snapshot on exit, but poll only while the shell is live.
-      const interval = running ? setInterval(() => void load(), 1_000) : undefined
-      onCleanup(() => {
-        disposed = true
-        clearInterval(interval)
-      })
+      const load = data.shellOutput
+      if (typeof id !== "string" || !load) return
+      onCleanup(followShellOutput({ id, directory: data.directory, running: pending(), load, onOutput: setStreamed }))
     })
     const command = () => {
       if (typeof props.input.command === "string") return props.input.command

@@ -10,6 +10,7 @@ export async function buildAppArchive(channel: string, options?: { skipBuild?: b
   await $`bun run build -- --sourcemap false`.cwd(root).env({
     ...process.env,
     OPENCODE_CHANNEL: channel,
+    VITE_OPENCODE_SERVER_MODE: "origin",
     // Production Vite of packages/app now transforms ~4.5k modules (Mermaid).
     // Default Node heap (~2GB) OOMs while rendering chunks; the archive
     // already drops .map files, so skip generating them.
