@@ -44,18 +44,21 @@ ultimate source of truth.
 
 ## Bindings and destructuring
 
-- [x] `const`, `let`, and accepted `var` declarations.
+- [x] `const`, `let`, and `var` declarations.
 - [x] Object and array destructuring in declarations, parameters, assignment expressions, and `for...of` bindings.
 - [x] Nested patterns, defaults, elisions, and rest elements.
 - [x] Assignment to identifiers, plain-object fields, non-negative integer array indexes, and writable URL
       fields.
 - [x] Direct function declarations are hoisted in program and block statement lists.
 - [x] Parameter defaults observe a temporal dead zone for later parameters.
-- [ ] JavaScript-correct function scoping, hoisting, and redeclaration for accepted `var` declarations.
+- [x] `var` is function-scoped and hoisted: names declared anywhere in a function or program body, including loop
+      heads, blocks, `switch` cases, and `try`/`catch`, read as `undefined` before their statement runs; redeclaration
+      assigns the one binding; a same-named parameter keeps its argument; closures in parameter defaults see outer
+      names rather than body `var`s.
 - [x] Predeclare `let` and `const` bindings in every lexical scope, including program/block bodies, switch bodies, and
       loop headers, so reads before initialization and self- or cross-referential initializers observe the JavaScript
       temporal dead zone.
-- [ ] Hoist function declarations accepted directly in switch cases.
+- [x] Function declarations are hoisted across all cases of a `switch`, like any other statement list.
 - [x] Computed object destructuring keys such as `const { [field]: value } = record`.
 - [x] Object destructuring from arrays, such as `const { length } = values`.
 - [x] Array binding and assignment destructuring from strings, Maps, Sets, URLSearchParams, custom synchronous
@@ -250,12 +253,13 @@ ultimate source of truth.
 ## Strings
 
 - [x] Case/normalization: `toLowerCase`, `toUpperCase`, `normalize`.
-- [x] Trimming: `trim`, `trimStart`, and `trimEnd`.
+- [x] Trimming: `trim`, `trimStart`, and `trimEnd`, plus the Annex B `trimLeft` and `trimRight` aliases.
 - [x] Searching/tests: `includes`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, and `search`.
-- [x] Slicing/access: `slice`, `substring`, `at`, `charAt`, `charCodeAt`, and `codePointAt`.
+- [x] Slicing/access: `slice`, `substring`, Annex B `substr`, `at`, `charAt`, `charCodeAt`, and `codePointAt`.
 - [x] Construction/transformation: `split`, `concat`, `repeat`, `padStart`, `padEnd`, `replace`, and `replaceAll`.
 - [x] Regular-expression integration: `match`, materialized `matchAll`, `replace`, `replaceAll`, `split`, and `search`.
 - [x] `localeCompare`; locale and options arguments are currently ignored.
+- [x] `isWellFormed` and `toWellFormed`.
 - [x] `toString`, `length`, numeric indexing, spread, and `for...of` by Unicode code point.
 - [x] Static `String.fromCharCode` and `String.fromCodePoint`.
 - [x] Native argument coercion for supported String methods; for example, `includes(1)` and `slice("1")` coerce like
@@ -316,6 +320,7 @@ ultimate source of truth.
 - [x] Local and UTC Date setters, including native argument coercion, mutation, rollover, invalid-Date recovery, and
       `TimeClip` behavior.
 - [x] `Date.prototype.toUTCString` and its `toGMTString` alias.
+- [x] `toDateString` and `toTimeString` in the host's local timezone.
 - [x] Native one-argument Date coercion for supported values, including booleans, null, arrays, and plain objects.
 - [x] Native Date loose-equality and default primitive-coercion semantics, using CodeMode's deterministic ISO string
       representation for the string primitive.
@@ -375,6 +380,6 @@ ultimate source of truth.
       shift them. The diagnostic names the rejected node type and attaches a short orientation to the supported
       subset; this matrix is the full reference.
 - [x] Model-visible host failure messages and underlying causes, including output-validation errors.
-- [ ] Distinguish user-thrown failures from interpreter defects and explicit tool refusals from internal tool
-      failures; preserve those categories in caught errors, promise rejection handlers, and `Promise.allSettled`
-      reasons.
+- [x] Caught errors do not distinguish user throws, interpreter failures, and tool failures; a program sees one
+      Error-shaped value with `name` and `message` in `catch`, rejection handlers, and `Promise.allSettled` reasons.
+      This is deliberate: the program should handle a failure the same way regardless of where it originated.

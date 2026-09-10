@@ -90,6 +90,18 @@ import { enumerableSource } from "../stdlib/object.js"
 import { coerceToNumber, coerceToString, compoundOperators, errorBrandName } from "../stdlib/value.js"
 import { Values } from "../values.js"
 
+// What a loop does with its body's result: exit with a StatementResult, or undefined to keep iterating.
+// Unlabelled break ends this loop; a label the loop does not carry propagates outward.
+const loopExit = (result: StatementResult, labels: ReadonlySet<string> | undefined): StatementResult | undefined => {
+  if (result.kind === "return") return result
+  if (result.kind === "break") {
+    if (result.label !== undefined && !labels?.has(result.label)) return result
+    return { kind: "none" }
+  }
+  if (result.kind === "continue" && result.label !== undefined && !labels?.has(result.label)) return result
+  return undefined
+}
+
 const calleeDescription = (callee: Expression | Super | undefined): string => {
   if (callee?.type === "Identifier") return callee.name
   if (callee?.type === "MemberExpression") {
@@ -153,6 +165,51 @@ const collectPatternNames = (pattern: Pattern, out: Array<string> = []): Array<s
       for (const prop of pattern.properties) {
         collectPatternNames(prop.type === "RestElement" ? prop.argument : prop.value, out)
       }
+      break
+  }
+  return out
+}
+
+// `var` names declared anywhere in a function body except inside nested functions, which own theirs.
+// Memoized per body: a function's var names never change, and hoisting runs on every call.
+const varNames = new WeakMap<ReadonlyArray<Statement | ModuleDeclaration>, ReadonlyArray<string>>()
+const collectVarNames = (
+  node: Statement | ModuleDeclaration | null | undefined,
+  out: Array<string> = [],
+): Array<string> => {
+  if (!node) return out
+  switch (node.type) {
+    case "VariableDeclaration":
+      if (node.kind === "var") for (const declaration of node.declarations) collectPatternNames(declaration.id, out)
+      break
+    case "BlockStatement":
+      for (const statement of node.body) collectVarNames(statement, out)
+      break
+    case "IfStatement":
+      collectVarNames(node.consequent, out)
+      collectVarNames(node.alternate, out)
+      break
+    case "ForStatement":
+      if (node.init?.type === "VariableDeclaration") collectVarNames(node.init, out)
+      collectVarNames(node.body, out)
+      break
+    case "ForInStatement":
+    case "ForOfStatement":
+      if (node.left.type === "VariableDeclaration") collectVarNames(node.left, out)
+      collectVarNames(node.body, out)
+      break
+    case "WhileStatement":
+    case "DoWhileStatement":
+    case "LabeledStatement":
+      collectVarNames(node.body, out)
+      break
+    case "SwitchStatement":
+      for (const item of node.cases) for (const statement of item.consequent) collectVarNames(statement, out)
+      break
+    case "TryStatement":
+      collectVarNames(node.block, out)
+      collectVarNames(node.handler?.body, out)
+      collectVarNames(node.finalizer, out)
       break
   }
   return out
@@ -264,6 +321,7 @@ class Frame<R> {
     return Effect.gen(function* () {
       self.predeclareLexical(program.body)
       self.hoistFunctions(program.body)
+      self.hoistVars(program.body)
       let value: unknown = undefined
       for (const [index, statement] of program.body.entries()) {
         if (index === program.body.length - 1 && statement.type === "ExpressionStatement") {
@@ -387,6 +445,20 @@ class Frame<R> {
     }
   }
 
+  // Hoisted `var` bindings start undefined, or copy a same-named parameter. Function bodies hoist
+  // into their own scope above the parameters so closures in parameter defaults keep seeing outer names.
+  private hoistVars(statements: ReadonlyArray<Statement | ModuleDeclaration>, parameters?: Map<string, Binding>): void {
+    const names =
+      varNames.get(statements) ??
+      statements.reduce<Array<string>>((out, statement) => collectVarNames(statement, out), [])
+    varNames.set(statements, names)
+    const scope = this.scopes.current()
+    for (const name of names) {
+      if (scope.has(name)) continue
+      scope.set(name, { mutable: true, value: parameters?.get(name)?.value, initialized: true })
+    }
+  }
+
   private predeclareLexical(statements: ReadonlyArray<Statement | ModuleDeclaration>): void {
     for (const statement of statements) {
       if (statement.type !== "VariableDeclaration") continue
@@ -424,7 +496,9 @@ class Frame<R> {
       self.scopes.push()
       return yield* Effect.gen(function* () {
         const cases = node.cases
-        self.predeclareLexical(cases.flatMap((branch) => branch.consequent))
+        const statements = cases.flatMap((branch) => branch.consequent)
+        self.predeclareLexical(statements)
+        self.hoistFunctions(statements)
         let defaultIndex: number | undefined
         let selected: number | undefined
         for (const [index, branch] of cases.entries()) {
@@ -466,21 +540,8 @@ class Frame<R> {
     const self = this
     return Effect.gen(function* () {
       while (yield* self.evaluateExpression(node.test)) {
-        const result = yield* self.evaluateStatement(node.body)
-
-        if (result.kind === "continue") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          continue
-        }
-
-        if (result.kind === "break") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          return { kind: "none" } satisfies StatementResult
-        }
-
-        if (result.kind === "return") {
-          return result
-        }
+        const exit = loopExit(yield* self.evaluateStatement(node.body), labels)
+        if (exit !== undefined) return exit
       }
 
       return { kind: "none" } satisfies StatementResult
@@ -494,21 +555,8 @@ class Frame<R> {
     const self = this
     return Effect.gen(function* () {
       do {
-        const result = yield* self.evaluateStatement(node.body)
-
-        if (result.kind === "continue") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          continue
-        }
-
-        if (result.kind === "break") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          return { kind: "none" } satisfies StatementResult
-        }
-
-        if (result.kind === "return") {
-          return result
-        }
+        const exit = loopExit(yield* self.evaluateStatement(node.body), labels)
+        if (exit !== undefined) return exit
       } while (yield* self.evaluateExpression(node.test))
 
       return { kind: "none" } satisfies StatementResult
@@ -554,26 +602,12 @@ class Frame<R> {
       nextIteration()
 
       while (testNode ? yield* self.evaluateExpression(testNode) : true) {
-        const result = yield* self.evaluateStatement(node.body)
-
-        if (result.kind === "return") {
-          return result
-        }
-
-        if (result.kind === "break") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          return { kind: "none" } satisfies StatementResult
-        }
-
-        if (result.kind === "continue" && result.label !== undefined && !labels?.has(result.label)) return result
+        const exit = loopExit(yield* self.evaluateStatement(node.body), labels)
+        if (exit !== undefined) return exit
 
         nextIteration()
         if (updateNode) {
           yield* self.evaluateExpression(updateNode)
-        }
-
-        if (result.kind === "continue") {
-          continue
         }
       }
 
@@ -617,10 +651,12 @@ class Frame<R> {
 
       const evaluateBody = (value: unknown) =>
         Effect.gen(function* () {
-          if (declared) {
+          if (declared?.lexical) {
             self.scopes.push()
-            if (declared.lexical) self.predeclarePattern(declared.pattern, declared.mutable, left)
-            yield* self.declarePattern(declared.pattern, value, declared.mutable, left, declared.lexical)
+            self.predeclarePattern(declared.pattern, declared.mutable, left)
+            yield* self.declarePattern(declared.pattern, value, declared.mutable, left, true)
+          } else if (declared) {
+            yield* self.assignPattern(declared.pattern, value, left)
           } else if (assignment) {
             yield* self.assignPattern(assignment, value, left)
           }
@@ -628,7 +664,7 @@ class Frame<R> {
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
-              if (declared) self.scopes.pop()
+              if (declared?.lexical) self.scopes.pop()
             }),
           ),
         )
@@ -647,22 +683,10 @@ class Frame<R> {
           }
           return yield* Effect.failCause(bodyExit.cause)
         }
-        const result = bodyExit.value
-
-        if (result.kind === "return") {
+        const exit = loopExit(bodyExit.value, labels)
+        if (exit !== undefined) {
           yield* close()
-          return result
-        }
-
-        if (result.kind === "break") {
-          yield* close()
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          return { kind: "none" } satisfies StatementResult
-        }
-
-        if (result.kind === "continue" && result.label !== undefined && !labels?.has(result.label)) {
-          yield* close()
-          return result
+          return exit
         }
       }
     }).pipe(
@@ -874,10 +898,12 @@ class Frame<R> {
 
       for (const key of keys) {
         const result = yield* Effect.gen(function* () {
-          if (declared) {
+          if (declared?.lexical) {
             self.scopes.push()
-            if (declared.lexical) self.predeclarePattern(declared.pattern, declared.mutable, left)
-            yield* self.declarePattern(declared.pattern, key, declared.mutable, left, declared.lexical)
+            self.predeclarePattern(declared.pattern, declared.mutable, left)
+            yield* self.declarePattern(declared.pattern, key, declared.mutable, left, true)
+          } else if (declared) {
+            yield* self.assignPattern(declared.pattern, key, left)
           } else if (assignmentName) {
             self.scopes.set(assignmentName, key, left)
           }
@@ -885,24 +911,13 @@ class Frame<R> {
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
-              if (declared) self.scopes.pop()
+              if (declared?.lexical) self.scopes.pop()
             }),
           ),
         )
 
-        if (result.kind === "return") {
-          return result
-        }
-
-        if (result.kind === "break") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          return { kind: "none" } satisfies StatementResult
-        }
-
-        if (result.kind === "continue") {
-          if (result.label !== undefined && !labels?.has(result.label)) return result
-          continue
-        }
+        const exit = loopExit(result, labels)
+        if (exit !== undefined) return exit
       }
 
       return { kind: "none" } satisfies StatementResult
@@ -1003,8 +1018,13 @@ class Frame<R> {
         }
 
         const init = declaration.init
+        // `var x` alone is a no-op: the binding was hoisted on function entry.
+        if (kind === "var") {
+          if (init) yield* self.assignPattern(declaration.id, yield* self.evaluateExpression(init), declaration)
+          continue
+        }
         const value = init ? yield* self.evaluateExpression(init) : undefined
-        yield* self.declarePattern(declaration.id, value, kind !== "const", declaration, kind !== "var")
+        yield* self.declarePattern(declaration.id, value, kind !== "const", declaration, true)
       }
     })
   }
@@ -1625,6 +1645,8 @@ class Frame<R> {
       }
 
       if (fn.body.type === "BlockStatement") {
+        invocation.scopes.push()
+        invocation.hoistVars(fn.body.body, paramScope)
         const result = yield* invocation.evaluateStatement(fn.body)
         return result.kind === "return" ? result.value : undefined
       }
@@ -1633,16 +1655,8 @@ class Frame<R> {
     })
     if (fn.generator) return Effect.succeed(this.createGenerator(invocation, run, fn.async))
     if (!fn.async) return run
-    // The initial yield assigns the promise before the body can self-resolve.
-    const box: { promise?: Values.Promise } = {}
-    return Effect.map(
-      this.createPromise(
-        Effect.flatMap(run, (value) => resolvePromiseValue(invocation.runtime.runner, value, fn.body, box)),
-      ),
-      (promise) => {
-        box.promise = promise
-        return promise
-      },
+    return this.runtime.promises.createWithSelf((self) =>
+      Effect.flatMap(run, (value) => resolvePromiseValue(invocation.runtime.runner, value, fn.body, self)),
     )
   }
 
