@@ -11,7 +11,7 @@ import {
   Message,
   type ContentPart,
 } from "@opencode/ai"
-import { Agent } from "@opencode/schema/agent"
+import type { SessionCompactionResult } from "@opencode/plugin/effect/session"
 import { SessionError } from "@opencode/schema/session-error"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Bus } from "../bus.js"
@@ -97,7 +97,7 @@ export type Editor = {
 
 export type AutoInput = {
   readonly context: SessionContext.Loaded
-  readonly prepare: SessionModelRequest.Interface["prepare"]
+  readonly prepare: SessionModelRequest.Interface["compaction"]
   /** Known overflow must recover from durable history, not submit the overflowing native window again. */
   readonly overflow?: boolean
 }
@@ -120,7 +120,7 @@ export type ManualInput = {
     SessionContext.Loaded & { readonly instructionUpdate: string },
     SessionRunnerModel.Error | AgentNotFoundError | Instructions.InitializationBlocked
   >
-  readonly prepare: SessionModelRequest.Interface["prepare"]
+  readonly prepare: SessionModelRequest.Interface["compaction"]
 }
 
 type ExecuteInput = AutoInput & {
@@ -390,12 +390,7 @@ export const layer = Layer.effect(
         },
       }),
     })
-    const failed = Effect.fnUntraced(function* (input: {
-      readonly sessionID: SessionSchema.ID
-      readonly reason: SessionMessage.Compaction["reason"]
-      readonly error: SessionError.Error
-      readonly inputID?: SessionMessage.ID
-    }) {
+    const failed = Effect.fnUntraced(function* (input: SessionEvent.Compaction.Failed["data"]) {
       yield* bus.publish(SessionEvent.Compaction.Failed, input)
       return { status: "failed" as const, error: input.error }
     })
@@ -408,6 +403,36 @@ export const layer = Layer.effect(
             recent,
             inputID: input.inputID,
           })
+    const supplied = Effect.fn("SessionCompaction.supplied")(function* (
+      input: ExecuteInput,
+      result: SessionCompactionResult,
+      recent: string,
+    ) {
+      const context = input.context
+      const usage = result.tokens
+        ? { tokens: result.tokens, cost: SessionUsage.calculateCost(context.model.cost, result.tokens) }
+        : undefined
+      if (usage)
+        yield* bus.publish(SessionEvent.UsageRecorded, {
+          sessionID: context.session.id,
+          source: "compaction",
+          ...usage,
+        })
+      yield* bus.publish(
+        SessionEvent.Compaction.Ended,
+        {
+          sessionID: context.session.id,
+          reason: input.reason,
+          model: context.model.ref,
+          providerState: result.providerState,
+          text: result.summary,
+          recent,
+          ...usage,
+        },
+        { metadata: result.metadata },
+      )
+      return { status: "completed" as const }
+    })
     // Manual controls settle through the inbox; only automatic work needs a durable interruption record.
     const interrupted = (input: ExecuteInput) =>
       input.reason === "auto"
@@ -433,22 +458,16 @@ export const layer = Layer.effect(
         messages,
       })
       return input.prepare({
-        kind: "compaction",
-        scope: {
-          session: context.session,
-          agentID: Agent.ID.make("compaction"),
-          contextAgentID: context.agent.id,
-          model: context.model,
-          tools: context.tools,
-        },
-        transcript: {
-          system: transcript.system,
-          messages: [
-            ...transcript.messages,
-            ...(input.instructionUpdate ? [Message.system(input.instructionUpdate)] : []),
-            ...prompt,
-          ],
-        },
+        session: context.session,
+        agent: context.agent.id,
+        model: context.model,
+        tools: context.tools,
+        system: transcript.system,
+        messages: [
+          ...transcript.messages,
+          ...(input.instructionUpdate ? [Message.system(input.instructionUpdate)] : []),
+          ...prompt,
+        ],
         webSocket,
       })
     }
@@ -468,6 +487,10 @@ export const layer = Layer.effect(
           error: { type: "provider.unsupported-operation", message },
         })
       const prepared = yield* compactionRequest(input, context.messages, [], "session")
+      if (prepared.event.result) {
+        yield* started(input, "")
+        return yield* supplied(input, prepared.event.result, "")
+      }
       const request = prepared.request
       const provenance = SessionProviderContext.provenance(context.model)
       if (!provenance) return yield* reject("Provider compaction requires a stable, configured endpoint")
@@ -483,7 +506,7 @@ export const layer = Layer.effect(
           "Provider compaction requires the endpoint in provider/model settings, not a model.request rewrite",
         )
       const transient = SessionRunnerRetry.transient(yield* SessionRunnerRetry.policy(context.session.id), {
-        agent: Agent.ID.make("compaction"),
+        agent: context.agent.id,
         model: context.model.ref,
         hook: prepared.retry,
       })
@@ -511,11 +534,12 @@ export const layer = Layer.effect(
               )
             }),
           )
-          if (result.usage)
+          const usage = result.usage ? SessionUsage.record(result.usage, context.model.cost) : undefined
+          if (usage)
             yield* bus.publish(SessionEvent.UsageRecorded, {
               sessionID: context.session.id,
               source: "compaction" as const,
-              ...SessionUsage.record(result.usage, context.model.cost),
+              ...usage,
             })
           yield* bus.publish(SessionEvent.Compaction.Ended, {
             sessionID: context.session.id,
@@ -524,6 +548,7 @@ export const layer = Layer.effect(
             text: "",
             recent: "",
             providerContext: SessionProviderContext.encode(provenance, result.replacement),
+            ...usage,
           })
           return { status: "completed" as const }
         }),
@@ -581,9 +606,10 @@ export const layer = Layer.effect(
       const prepared = yield* compactionRequest(input, history.messages, [
         Message.user(buildPrompt(previous !== undefined, legacy)),
       ])
+      if (prepared.event.result) return yield* supplied(input, prepared.event.result, history.recent)
       // Both requests share the retry allowance; rejected output never enters the reminder request.
       const transient = SessionRunnerRetry.transient(yield* SessionRunnerRetry.policy(context.session.id), {
-        agent: Agent.ID.make("compaction"),
+        agent: context.agent.id,
         model: context.model.ref,
         hook: prepared.retry,
       })
@@ -671,6 +697,7 @@ export const layer = Layer.effect(
           reason: input.reason,
           error,
           inputID: input.inputID,
+          ...usage,
         })
       }
       yield* bus.publish(SessionEvent.Compaction.Ended, {
@@ -680,6 +707,7 @@ export const layer = Layer.effect(
         providerState,
         text: summary,
         recent: history.recent,
+        ...usage,
       })
       return { status: "completed" as const }
     })

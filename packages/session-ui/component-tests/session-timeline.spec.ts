@@ -35,6 +35,21 @@ story("renders streamed reasoning without starting the app", async ({ mount }) =
   await expect(timeline.getByText("Checking the current contract", { exact: true })).toBeVisible()
 })
 
+story("aligns the retry icon with the error label", async ({ mount }) => {
+  const timeline = await mount("current-session-timeline-rows--provider-retry")
+  const card = timeline.locator('[data-kind="session-retry-card"]')
+  const icon = card.locator('[data-slot="icon-svg"]')
+  const label = card.locator('[data-slot="session-turn-retry-message"]')
+  await expect(icon).toBeVisible()
+  await expect(label).toBeVisible()
+  const [iconY, labelY] = await Promise.all([
+    icon.evaluate((element) => element.getBoundingClientRect().y),
+    label.evaluate((element) => element.getBoundingClientRect().y),
+  ])
+
+  expect(iconY).toBe(labelY)
+})
+
 // Moved from packages/app/e2e/regression/session-timeline-context-state.spec.ts
 story("preserves a collapsed context group through count and status updates", async ({ mount }) => {
   const timeline = await mount("current-session-research-agents--agent-research", { args: { scenario: "exploration" } })
@@ -53,7 +68,7 @@ story("space activates a focused timeline button instead of scrolling", async ({
   await page.setViewportSize({ width: 800, height: 240 })
   const timeline = await mount("current-session-terminal-work--terminal-commands", { args: { scenario: "collapsed" } })
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeGreaterThan(0)
-  const trigger = timeline.getByRole("button", { name: "1 used Shell", exact: true })
+  const trigger = timeline.getByRole("button", { name: "Used 1 Shell", exact: true })
   await expect(trigger).toHaveAttribute("aria-expanded", "false")
   await trigger.focus()
   const before = await page.evaluate(() => window.scrollY)

@@ -57,6 +57,8 @@ type OpenCodeEventMap = { [Type in OpenCodeEvent["type"]]: Extract<OpenCodeEvent
 export type CreateDataInput = {
   readonly api: () => OpenCodeClient
   readonly directory: string
+  /** Raw-message window used for an initial transcript read. Older pages retain their normal size. */
+  readonly initialMessageLimit?: () => number
   readonly event: {
     readonly on: <Type extends OpenCodeEvent["type"]>(
       type: Type,
@@ -1073,8 +1075,11 @@ export function createData(config: CreateDataInput) {
               reason: event.data.reason,
               model: event.data.model,
               providerState: event.data.providerState,
+              providerContext: event.data.providerContext,
               summary: event.data.text,
               recent: event.data.recent,
+              cost: event.data.cost,
+              tokens: event.data.tokens,
             })
             return
           }
@@ -1085,8 +1090,11 @@ export function createData(config: CreateDataInput) {
             reason: event.data.reason,
             model: event.data.model,
             providerState: event.data.providerState,
+            providerContext: event.data.providerContext,
             summary: event.data.text,
             recent: event.data.recent,
+            cost: event.data.cost,
+            tokens: event.data.tokens,
             time: { created: event.created },
           })
         })
@@ -1106,6 +1114,8 @@ export function createData(config: CreateDataInput) {
               message: "Compaction failed before recording an error",
             },
             metadata: current?.type === "compaction" ? current.metadata : event.metadata,
+            cost: event.data.cost,
+            tokens: event.data.tokens,
             time: current?.type === "compaction" ? current.time : { created: event.created },
           }
           if (current?.type === "compaction") {
@@ -1561,7 +1571,11 @@ export function createData(config: CreateDataInput) {
         },
         sync(sessionID: string) {
           return sync.run(`session.message:${sessionID}`, async () => {
-            const response = await api().message.list({ sessionID, limit: messagePageLimit, order: "desc" })
+            const response = await api().message.list({
+              sessionID,
+              limit: config.initialMessageLimit?.() ?? messagePageLimit,
+              order: "desc",
+            })
             const fetched = response.data.toReversed()
             // Same protection as the pending sync: a re-fetch racing an
             // admission must not wipe its local transcript row.
@@ -1575,9 +1589,11 @@ export function createData(config: CreateDataInput) {
               (item) => !ids.has(item.id) && (outbox.has(item.id) || admitted.has(item.id)),
             )
             const messages = local.length === 0 ? fetched : [...fetched, ...local]
-            messageIndex.set(sessionID, new Map(messages.map((message, index) => [message.id, index])))
-            setStore("session", "message", sessionID, reconcile(messages))
-            setStore("session", "messageCursor", sessionID, response.cursor.next ?? undefined)
+            batch(() => {
+              messageIndex.set(sessionID, new Map(messages.map((message, index) => [message.id, index])))
+              setStore("session", "message", sessionID, reconcile(messages))
+              setStore("session", "messageCursor", sessionID, response.cursor.next ?? undefined)
+            })
           })
         },
         more(sessionID: string) {

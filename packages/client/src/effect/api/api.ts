@@ -986,6 +986,15 @@ export type SessionLogOutput =
               | undefined
             readonly text: string
             readonly recent: string
+            readonly cost?: (number & Brand.Brand<"Money.USD">) | undefined
+            readonly tokens?:
+              | {
+                  readonly input: number
+                  readonly output: number
+                  readonly reasoning: number
+                  readonly cache: { readonly read: number; readonly write: number }
+                }
+              | undefined
           }
         }
       | {
@@ -1000,6 +1009,15 @@ export type SessionLogOutput =
             readonly reason: "auto" | "manual"
             readonly error: { readonly type: string; readonly message: string; readonly status?: number | undefined }
             readonly inputID?: SessionMessage.ID | undefined
+            readonly cost?: (number & Brand.Brand<"Money.USD">) | undefined
+            readonly tokens?:
+              | {
+                  readonly input: number
+                  readonly output: number
+                  readonly reasoning: number
+                  readonly cache: { readonly read: number; readonly write: number }
+                }
+              | undefined
           }
         }
       | {
@@ -1148,6 +1166,18 @@ export type MessageListInput = {
   readonly limit?: number | undefined
   readonly order?: "asc" | "desc" | undefined
   readonly cursor?: string | undefined
+  readonly type?:
+    | "agent-switched"
+    | "model-switched"
+    | "location-switched"
+    | "user"
+    | "synthetic"
+    | "system"
+    | "skill"
+    | "shell"
+    | "assistant"
+    | "compaction"
+    | undefined
 }
 export type MessageListOutput = {
   readonly data: ReadonlyArray<SessionMessage.Info>
