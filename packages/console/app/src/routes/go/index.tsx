@@ -17,6 +17,7 @@ import { IconMiniMax, IconMiMo, IconZai, IconAlibaba, IconDeepSeek } from "~/com
 import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
 import { LocaleLinks } from "~/component/locale-links"
+import { goUsageLimits } from "~/lib/language"
 
 const checkLoggedIn = query(async () => {
   "use server"
@@ -45,8 +46,10 @@ const models = [
   { name: "MiniMax M2.7", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "Muse Spark 1.3 Contributor", training: "go.faq.a5.used", retention: "go.faq.a5.notZdr" },
   { name: "Muse Spark 1.2 Contributor", training: "go.faq.a5.used", retention: "go.faq.a5.notZdr" },
+  { name: "DeepSeek V4.1 Flash", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "DeepSeek V4 Pro", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "DeepSeek V4 Flash", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
+  { name: "DeepSeek V4 Flash Vision Exp", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "Hy4 preview", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "Hy3", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
   { name: "Omen Alpha", training: "go.faq.a5.notUsed", retention: "go.faq.a5.retention0" },
@@ -82,7 +85,7 @@ export default function Home() {
             <div data-component="desktop-app-banner">
               <span data-slot="badge">{i18n.t("home.banner.badge")}</span>
               <div data-slot="content">
-                <span data-slot="text">{i18n.t("go.banner.text")}</span>
+                <span data-slot="text">{i18n.t("go.promo.deepseek")}</span>
               </div>
             </div>
             <div data-slot="hero-copy">
@@ -207,7 +210,7 @@ export default function Home() {
           </section>
 
           <section data-component="comparison">
-            <LimitsGraph href={language.route("/docs/go/#usage-limits")} />
+            <LimitsGraph href={goUsageLimits(language.locale())} />
           </section>
 
           <section data-component="problem">
