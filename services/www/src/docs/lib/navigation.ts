@@ -30,7 +30,6 @@ export const docsSections: DocsSection[] = [
       {
         title: "Configure",
         items: [
-          { title: "LSP", slug: "lsp" },
           { title: "Agents", slug: "agents" },
           { title: "Models", slug: "models" },
           { title: "Skills", slug: "skills" },
@@ -38,6 +37,7 @@ export const docsSections: DocsSection[] = [
           { title: "Commands", slug: "commands" },
           { title: "Plugins", slug: "plugins" },
           { title: "Providers", slug: "providers" },
+          { title: "Websearch", slug: "websearch" },
           { title: "Snapshots", slug: "snapshots" },
           { title: "Compaction", slug: "compaction" },
           { title: "Formatters", slug: "formatters" },
@@ -46,8 +46,8 @@ export const docsSections: DocsSection[] = [
           { title: "MCP servers", slug: "mcp-servers" },
           { title: "Permissions", slug: "permissions" },
           { title: "Instructions", slug: "instructions" },
-          { title: "Session sharing", slug: "sharing" },
-          { title: "Session warming", slug: "warming" },
+          { title: "Sharing", slug: "sharing" },
+          { title: "Warming", slug: "warming" },
         ],
       },
       {
@@ -67,18 +67,13 @@ export const docsSections: DocsSection[] = [
         items: [
           { title: "Intro", slug: "cli" },
           { title: "Config", slug: "cli/config" },
-        ],
-      },
-      {
-        title: "Configure",
-        items: [
+          { title: "Web", slug: "cli/web" },
+          { title: "Providers", slug: "cli/providers" },
+          { title: "Commands", slug: "cli/commands" },
           { title: "Theme", slug: "cli/theme" },
           { title: "Plugins", slug: "cli/plugins" },
           { title: "Keybinds", slug: "cli/keybinds" },
         ],
-      },
-      {
-        items: [{ title: "Providers", slug: "cli/providers" }],
       },
     ],
   },
@@ -140,6 +135,7 @@ export const docsSections: DocsSection[] = [
         items: [
           { title: "Intro", slug: "console" },
           { title: "Models", slug: "console/models" },
+          { title: "Websearch", slug: "console/websearch" },
           { title: "Go", slug: "console/go" },
         ],
       },
