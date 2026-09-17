@@ -1,16 +1,16 @@
 # Fork-local Apple Silicon release: signed, notarized, and stapled macOS arm64
 # DMGs for desktop + CLI.
 #
-# UX: one manual click — Actions → macos-arm64-signed → Run workflow
-#     (uncheck "Build and release the desktop DMG" for CLI-only builds)
+# UX: Actions → macos-arm64-signed → Run workflow
+#     Use workflow from: v2 (OpenCode 2) or dev (classic V1)
+#     Uncheck "Build and release the desktop DMG" for CLI-only
 #
-# Product:
-#   opencode-2  — v2 branch, OpenCode 2 (packages/cli, bin/opencode) + desktop
-#   classic-v1  — this branch (dev), classic V1 CLI (packages/opencode)
+# Pick the product with GitHub's "Use workflow from" branch:
+#   v2   — OpenCode 2 from that branch (your changes)
+#   dev  — classic V1 from that branch
 #
-# OpenCode 2 jobs check out ref v2, so local actions/scripts must exist there too:
-# .github/actions/macos-codesigning-setup and .github/scripts/macos-signing
-# are mirrored onto the v2 branch — keep them in sync when they change here.
+# This workflow file must exist on both branches. Keep signing actions/scripts
+# in sync on v2 and dev.
 #
 # resolve-version records the commit it checked out (built_sha); package-*
 # and publish pin their checkout to it so a moving branch ref cannot shift
@@ -57,20 +57,10 @@ on:
       release_version:
         description: >-
           Version embedded in the binaries. Leave empty to use the package
-          version (packages/cli for OpenCode 2, packages/opencode for classic V1).
+          version (packages/cli on v2, packages/opencode on dev).
         required: false
         type: string
         default: ""
-      product:
-        description: >-
-          OpenCode 2 builds your v2 branch (your changes).
-          Classic V1 builds this branch (dev).
-        required: false
-        type: choice
-        options:
-          - opencode-2
-          - classic-v1
-        default: opencode-2
       build_desktop:
         description: Build and release the desktop DMG too. Uncheck to build and release only the CLI DMG.
         required: false
@@ -80,8 +70,12 @@ on:
 permissions:
   contents: read
 
+# GitHub's "Use workflow from" branch is the product picker.
+env:
+  BUILD_PRODUCT: ${{ github.ref_name == 'dev' && 'classic-v1' || 'opencode-2' }}
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.product }}-${{ inputs.release_version || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.release_version || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -102,11 +96,9 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
-          ref: ${{ inputs.product == 'classic-v1' && github.ref || 'v2' }}
           persist-credentials: false
 
-      # The dispatch SHA belongs to the branch the workflow file lives on (dev);
-      # OpenCode 2 builds from v2, so bind the tag and release to the commit actually built.
+      # Build the branch selected in "Use workflow from" (v2 or dev).
       - name: Resolve built commit
         id: sha
         shell: bash
@@ -117,9 +109,9 @@ jobs:
         shell: bash
         env:
           INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
-          INPUT_CHANNEL: ${{ inputs.product }}
+          INPUT_CHANNEL: ${{ env.BUILD_PRODUCT }}
           GITHUB_SHA: ${{ steps.sha.outputs.sha }}
-          PACKAGE_JSON: ${{ inputs.product == 'classic-v1' && 'packages/opencode/package.json' || 'packages/cli/package.json' }}
+          PACKAGE_JSON: ${{ env.BUILD_PRODUCT == 'classic-v1' && 'packages/opencode/package.json' || 'packages/cli/package.json' }}
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
@@ -479,12 +471,11 @@ jobs:
         id: notes
         shell: bash
         env:
-          PRODUCT: ${{ inputs.product }}
+          PRODUCT: ${{ env.BUILD_PRODUCT }}
           BUILT_SHA: ${{ needs.resolve-version.outputs.built_sha }}
         run: |
           set -euo pipefail
           notes_path="${RUNNER_TEMP}/release-notes.md"
-          # OpenCode 2 checks out v2, so the dispatch SHA (dev) is not in this clone.
           if ! git cat-file -e "${BUILT_SHA}^{commit}" 2>/dev/null; then
             git fetch --depth=1 origin "${BUILT_SHA}"
           fi
@@ -506,7 +497,7 @@ jobs:
               echo "- \`opencode-desktop-mac-arm64.dmg\` — desktop app"
             fi
             echo
-            echo "Product: \`${{ inputs.product }}\`"
+            echo "Product: \`${{ env.BUILD_PRODUCT }}\` (from \`${{ github.ref_name }}\`)"
             echo
             echo "Built from \`${BUILT_SHA}\`."
             echo
