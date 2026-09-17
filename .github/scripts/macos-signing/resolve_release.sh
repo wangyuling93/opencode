@@ -5,7 +5,7 @@
 #
 # Env inputs:
 #   INPUT_RELEASE_VERSION  optional override
-#   INPUT_CHANNEL          prod|beta|dev|next (default prod)
+#   INPUT_CHANNEL          prod|v2|beta|dev|next (default prod)
 #   GITHUB_SHA             required
 #   GITHUB_OUTPUT          required in Actions
 #   WORKSPACE              optional repo root (default cwd)
@@ -34,16 +34,42 @@ if [[ ! "${short_sha}" =~ ^${short_sha_re}$ ]]; then
   exit 1
 fi
 
-# Desktop channel vs Script channel: prod embeds "latest" in the CLI binary.
+# Workflow input vs baked updater channels.
+#   prod — V1 from dev; CLI latest, desktop prod
+#   v2   — OpenCode 2 from the v2 branch; CLI latest, desktop prod
+#   beta — OpenCode 2 preview from v2; CLI+desktop beta
 channel="${INPUT_CHANNEL:-prod}"
 case "${channel}" in
-  prod) cli_channel="latest" ;;
-  beta|dev|next) cli_channel="${channel}" ;;
+  prod)
+    product="v1"
+    cli_channel="latest"
+    desktop_channel="prod"
+    cli_dir="packages/opencode/dist/opencode-darwin-arm64"
+    ;;
+  v2)
+    product="v2"
+    cli_channel="latest"
+    desktop_channel="prod"
+    cli_dir="packages/cli/dist/cli-darwin-arm64"
+    ;;
+  beta)
+    product="v2"
+    cli_channel="beta"
+    desktop_channel="beta"
+    cli_dir="packages/cli/dist/cli-darwin-arm64"
+    ;;
+  dev|next)
+    product="v2"
+    cli_channel="${channel}"
+    desktop_channel="${channel}"
+    cli_dir="packages/cli/dist/cli-darwin-arm64"
+    ;;
   *)
     echo "Unsupported channel '${channel}'" >&2
     exit 1
     ;;
 esac
+cli_bin="${cli_dir}/bin/opencode"
 
 if [[ -n "${PACKAGE_JSON:-}" ]]; then
   package_json="${PACKAGE_JSON}"
@@ -108,8 +134,12 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "release_version=${release_version}"
     echo "release_name=${release_name}"
     echo "channel=${channel}"
+    echo "product=${product}"
     echo "cli_channel=${cli_channel}"
+    echo "desktop_channel=${desktop_channel}"
+    echo "cli_dir=${cli_dir}"
+    echo "cli_bin=${cli_bin}"
   } >>"${GITHUB_OUTPUT}"
 fi
 
-echo "OpenCode ${release_version} from ${version_source}; tag ${release_tag}; channel ${channel}; cli_channel ${cli_channel}"
+echo "OpenCode ${release_version} from ${version_source}; tag ${release_tag}; channel ${channel}; product ${product}; cli_channel ${cli_channel}; desktop_channel ${desktop_channel}"

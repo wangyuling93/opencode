@@ -4,11 +4,13 @@
 # UX: one manual click — Actions → macos-arm64-signed → Run workflow
 #     (uncheck "Build and release the desktop DMG" for CLI-only builds)
 #
-# Channel (drives both desktop and CLI):
-#   prod  — dev branch, classic opencode CLI (packages/opencode)
-#   beta  — v2 branch, opencode2 CLI (packages/cli) + desktop
+# Channel (drives git ref, CLI package, and baked updater channel):
+#   v2    — v2 branch, OpenCode 2 CLI (packages/cli, bin/opencode) + desktop
+#           CLI/desktop updater channel latest/prod (stable OpenCode 2)
+#   beta  — same v2 tree, but CLI+desktop updater channel beta
+#   prod  — dev branch, classic V1 CLI (packages/opencode)
 #
-# beta jobs check out ref v2, so local actions/scripts must exist there too:
+# v2/beta jobs check out ref v2, so local actions/scripts must exist there too:
 # .github/actions/macos-codesigning-setup and .github/scripts/macos-signing
 # are mirrored onto the v2 branch — keep them in sync when they change here.
 #
@@ -26,11 +28,10 @@
 #                                 skipped when build_desktop=false)
 #                    └── publish (optional; waits for both that run)
 #
-# Beta (v2) compile must match upstream publish.yml: Bun canary +
-# BUN_COMPILE_RELEASE=canary. Current v2 always passes compile.executablePath;
-# leaving that unset makes Bun 1.3.14 reject the build.
-# Desktop embeds that same-commit CLI via OPENCODE_CLI_DIST (v2 prebuild
-# otherwise downloads npm @beta, which is a stale tarball without bin/opencode2).
+# OpenCode 2 compile matches upstream publish.yml: Bun from v2 package.json
+# (currently 1.4.2) and BUN_COMPILE_RELEASE=bun-v1.4.2.
+# Desktop embeds that same-commit CLI via OPENCODE_CLI_DIST (prod prebuild
+# requires it; beta otherwise downloads npm @beta).
 #
 # codesigning environment (secrets/vars):
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
@@ -42,7 +43,7 @@
 #
 # Assets:
 #   opencode-desktop-mac-arm64.dmg
-#   opencode-cli-mac-arm64.dmg (opencode on prod, opencode2 on beta)
+#   opencode-cli-mac-arm64.dmg (opencode; V1 on prod, OpenCode 2 on v2/beta)
 # Tag: macos-arm64-v{version}-{7-char commit sha}
 
 name: macos-arm64-signed
@@ -58,20 +59,22 @@ on:
       release_version:
         description: >-
           Version embedded in the binaries. Leave empty to use the package
-          version (packages/opencode on prod, packages/desktop on beta).
+          version (packages/opencode on prod, packages/cli on v2/beta).
         required: false
         type: string
         default: ""
       channel:
         description: >-
-          Channel for both desktop and CLI. prod builds the dev branch;
-          beta builds the v2 branch (opencode2 CLI + desktop).
+          v2 = stable OpenCode 2 from the v2 branch (your changes).
+          beta = same tree with the beta updater channel.
+          prod = classic V1 from this branch (dev).
         required: false
         type: choice
         options:
-          - prod
+          - v2
           - beta
-        default: prod
+          - prod
+        default: v2
       build_desktop:
         description: Build and release the desktop DMG too. Uncheck to build and release only the CLI DMG.
         required: false
@@ -94,12 +97,16 @@ jobs:
       release_version: ${{ steps.resolve.outputs.release_version }}
       release_name: ${{ steps.resolve.outputs.release_name }}
       channel: ${{ steps.resolve.outputs.channel }}
+      product: ${{ steps.resolve.outputs.product }}
       cli_channel: ${{ steps.resolve.outputs.cli_channel }}
+      desktop_channel: ${{ steps.resolve.outputs.desktop_channel }}
+      cli_dir: ${{ steps.resolve.outputs.cli_dir }}
+      cli_bin: ${{ steps.resolve.outputs.cli_bin }}
       built_sha: ${{ steps.sha.outputs.sha }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
-          ref: ${{ inputs.channel == 'beta' && 'v2' || github.ref }}
+          ref: ${{ inputs.channel == 'prod' && github.ref || 'v2' }}
           persist-credentials: false
 
       # The dispatch SHA belongs to the branch the workflow file lives on (dev);
@@ -116,11 +123,8 @@ jobs:
           INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
           INPUT_CHANNEL: ${{ inputs.channel }}
           GITHUB_SHA: ${{ steps.sha.outputs.sha }}
-          # prod (dev branch) tracks the classic CLI version; beta (v2 branch)
-          # has no packages/opencode, so desktop tracks the release cadence.
-          # Note: the opencode2 binary embeds this version, so its npm-channel
-          # auto-update no-ops when it is above the published @opencode-ai/cli.
-          PACKAGE_JSON: ${{ inputs.channel == 'beta' && 'packages/desktop/package.json' || 'packages/opencode/package.json' }}
+          # prod tracks classic CLI; v2/beta track packages/cli on the v2 branch.
+          PACKAGE_JSON: ${{ inputs.channel == 'prod' && 'packages/opencode/package.json' || 'packages/cli/package.json' }}
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
@@ -142,37 +146,31 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-bun
-        if: inputs.channel != 'beta'
+        if: needs.resolve-version.outputs.product != 'v2'
 
       # v2 setup-bun accepts bun-version; the prod (dev) action copy does not.
+      # Omit bun-version so OpenCode 2 uses the v2 package.json pin (1.4.2).
       - uses: ./.github/actions/setup-bun
-        if: inputs.channel == 'beta'
-        with:
-          bun-version: canary
+        if: needs.resolve-version.outputs.product == 'v2'
 
       - name: Build darwin-arm64 CLI
         # Cross-compile from Linux like upstream publish.yml. --single would
         # emit a linux binary; --target selects the macOS artifact we sign.
-        run: ${{ inputs.channel == 'beta' && 'bun ./packages/cli/script/build.ts --target=opencode2-darwin-arm64' || './packages/opencode/script/build.ts --target=opencode-darwin-arm64' }}
+        run: ${{ needs.resolve-version.outputs.product == 'v2' && 'bun ./packages/cli/script/build.ts --target=opencode-darwin-arm64' || './packages/opencode/script/build.ts --target=opencode-darwin-arm64' }}
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.cli_channel }}
-          BUN_COMPILE_RELEASE: ${{ inputs.channel == 'beta' && 'canary' || '' }}
+          BUN_COMPILE_RELEASE: ${{ needs.resolve-version.outputs.product == 'v2' && 'bun-v1.4.2' || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check CLI artifact
         shell: bash
         env:
-          CHANNEL: ${{ inputs.channel }}
+          BINARY: ${{ needs.resolve-version.outputs.cli_bin }}
         run: |
           set -euo pipefail
-          if [[ "${CHANNEL}" == "beta" ]]; then
-            binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
-            dist_dir="packages/cli/dist/cli-darwin-arm64"
-          else
-            binary="packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
-            dist_dir="packages/opencode/dist/opencode-darwin-arm64"
-          fi
+          binary="${BINARY}"
+          dist_dir="$(dirname "$(dirname "$binary")")"
           if [[ ! -f "$binary" ]]; then
             echo "Missing CLI binary: $binary" >&2
             ls -lahR "$(dirname "$dist_dir")" || true
@@ -184,7 +182,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-arm64-unsigned-cli
-          path: ${{ inputs.channel == 'beta' && 'packages/cli/dist/cli-darwin-arm64' || 'packages/opencode/dist/opencode-darwin-arm64' }}
+          path: ${{ needs.resolve-version.outputs.cli_dir }}
           if-no-files-found: error
           retention-days: 7
 
@@ -221,22 +219,17 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: macos-arm64-unsigned-cli
-          path: ${{ inputs.channel == 'beta' && 'packages/cli/dist/cli-darwin-arm64' || 'packages/opencode/dist/opencode-darwin-arm64' }}
+          path: ${{ needs.resolve-version.outputs.cli_dir }}
 
       - name: Verify CLI binary
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          CHANNEL: ${{ inputs.channel }}
+          BINARY: ${{ needs.resolve-version.outputs.cli_bin }}
         run: |
           set -euo pipefail
-          if [[ "${CHANNEL}" == "beta" ]]; then
-            binary="packages/cli/dist/cli-darwin-arm64/bin/opencode2"
-            dist_dir="packages/cli/dist"
-          else
-            binary="packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
-            dist_dir="packages/opencode/dist"
-          fi
+          binary="${BINARY}"
+          dist_dir="$(dirname "$(dirname "$binary")")"
           if [[ ! -f "$binary" ]]; then
             echo "Missing CLI binary: $binary" >&2
             ls -lahR "$dist_dir" || true
@@ -254,8 +247,8 @@ jobs:
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          BINARY_PATH: ${{ inputs.channel == 'beta' && 'packages/cli/dist/cli-darwin-arm64/bin/opencode2' || 'packages/opencode/dist/opencode-darwin-arm64/bin/opencode' }}
-          BINARY_NAME: ${{ inputs.channel == 'beta' && 'opencode2' || 'opencode' }}
+          BINARY_PATH: ${{ needs.resolve-version.outputs.cli_bin }}
+          BINARY_NAME: opencode
         run: ./.github/scripts/macos-signing/package_cli_dmg.sh
 
       - name: Upload signed CLI DMG
@@ -293,7 +286,7 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=8192
       # bun run build re-runs the `prebuild` lifecycle script. Keep this set
       # for every desktop step so that path does not fall back to npm @beta.
-      OPENCODE_CLI_DIST: ${{ inputs.channel == 'beta' && format('{0}/packages/cli/dist', github.workspace) || '' }}
+      OPENCODE_CLI_DIST: ${{ needs.resolve-version.outputs.product == 'v2' && format('{0}/packages/cli/dist', github.workspace) || '' }}
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
@@ -312,25 +305,23 @@ jobs:
           resolve-identity: "false"
 
       - uses: ./.github/actions/setup-bun
-        if: inputs.channel != 'beta'
+        if: needs.resolve-version.outputs.product != 'v2'
         with:
           install-flags: --os=darwin --cpu=arm64
 
       - uses: ./.github/actions/setup-bun
-        if: inputs.channel == 'beta'
+        if: needs.resolve-version.outputs.product == 'v2'
         with:
           install-flags: --os=darwin --cpu=arm64
-          bun-version: canary
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
 
-      # Same-commit opencode2 from the Linux build. v2 prebuild only copies a
-      # local build when OPENCODE_CLI_DIST is set; otherwise it fetches npm
-      # @beta (bin/lildax, not bin/opencode2).
+      # Same-commit OpenCode 2 CLI from the Linux build. prod prebuild requires
+      # OPENCODE_CLI_DIST; beta otherwise fetches npm @beta.
       - name: Download unsigned CLI
-        if: inputs.channel == 'beta'
+        if: needs.resolve-version.outputs.product == 'v2'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: macos-arm64-unsigned-cli
@@ -341,7 +332,7 @@ jobs:
         working-directory: packages/desktop
         env:
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
+          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.desktop_channel }}
           RUST_TARGET: aarch64-apple-darwin
 
       - name: Build desktop
@@ -350,10 +341,10 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
           OPENCODE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
-          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
+          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.desktop_channel }}
 
       - name: Drop CLI build tree after embed
-        if: inputs.channel == 'beta'
+        if: needs.resolve-version.outputs.product == 'v2'
         run: rm -rf packages/cli/dist
 
       # Keep node_modules/dist (electron-builder needs them); only drop caches.
@@ -369,7 +360,7 @@ jobs:
         working-directory: packages/desktop
         timeout-minutes: 90
         env:
-          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.channel }}
+          OPENCODE_CHANNEL: ${{ needs.resolve-version.outputs.desktop_channel }}
           CSC_KEYCHAIN: build.keychain
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -498,7 +489,7 @@ jobs:
         run: |
           set -euo pipefail
           notes_path="${RUNNER_TEMP}/release-notes.md"
-          # beta checks out v2, so the dispatch SHA (dev) is not in this clone.
+          # v2/beta check out v2, so the dispatch SHA (dev) is not in this clone.
           if ! git cat-file -e "${BUILT_SHA}^{commit}" 2>/dev/null; then
             git fetch --depth=1 origin "${BUILT_SHA}"
           fi
@@ -511,16 +502,16 @@ jobs:
               echo "Asset (hard-verified for codesign + staple before publish):"
             fi
             echo
-            if [[ "${CHANNEL}" == "beta" ]]; then
-              echo "- \`opencode-cli-mac-arm64.dmg\` — opencode2 terminal CLI (\`opencode2\`)"
+            if [[ "${CHANNEL}" == "prod" ]]; then
+              echo "- \`opencode-cli-mac-arm64.dmg\` — classic V1 terminal CLI (\`opencode\`)"
             else
-              echo "- \`opencode-cli-mac-arm64.dmg\` — terminal CLI (\`opencode\`)"
+              echo "- \`opencode-cli-mac-arm64.dmg\` — OpenCode 2 terminal CLI (\`opencode\`)"
             fi
             if [[ "${{ inputs.build_desktop }}" == "true" ]]; then
               echo "- \`opencode-desktop-mac-arm64.dmg\` — desktop app"
             fi
             echo
-            echo "Channel: \`${{ needs.resolve-version.outputs.channel }}\`"
+            echo "Channel: \`${{ needs.resolve-version.outputs.channel }}\` (CLI updater \`${{ needs.resolve-version.outputs.cli_channel }}\`)"
             echo
             echo "Built from \`${BUILT_SHA}\`."
             echo
