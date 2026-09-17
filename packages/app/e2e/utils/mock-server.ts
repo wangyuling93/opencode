@@ -6,9 +6,13 @@ import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { MockApi, MockBadRequest, MockNotFound } from "./mock-api"
 
 export interface MockServerConfig {
+  server?: string
   provider: unknown | (() => unknown)
   integrationMethods?: Record<string, unknown[]>
   onConnectKey?: (input: { integrationID: string; body: unknown }) => void
+  shells?: unknown[]
+  configEntries?: unknown[]
+  websearchProviders?: unknown[]
   directory: string
   project: unknown
   sessions: ({ id: string } & Record<string, unknown>)[]
@@ -38,7 +42,7 @@ export interface MockServerConfig {
   sessionStatus?: Record<string, unknown> | (() => Record<string, unknown>)
   inbox?: unknown[] | (() => unknown[])
   onPrompt?: (input: { sessionID: string; body: Record<string, unknown> }) => void
-  onInboxChange?: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" }) => void
+  onInboxChange?: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" | "queue" }) => void
 }
 
 type MockStreamWindow = Window & {
@@ -47,7 +51,9 @@ type MockStreamWindow = Window & {
 }
 
 export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
-  const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
+  const server =
+    config.server ??
+    `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 
   await page.addInitScript(
     ({ server, retry }) => {
@@ -185,13 +191,14 @@ export function createMockServerHandler(config: MockServerConfig) {
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
-  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "access-control-expose-headers": "x-next-cursor",
 }
 
 function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, string>; nextCursor: number }) {
   const noContent = Effect.succeed(HttpApiSchema.NoContent.make())
   const delay = config.messageDelay === undefined ? Effect.void : Effect.sleep(Duration.millis(config.messageDelay))
+  const configEntries = config.configEntries ?? []
   return HttpApiBuilder.group(MockApi, "mock", (handlers) =>
     handlers
       .handleRaw("event", () => {
@@ -212,8 +219,14 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         }),
       )
       .handleAll({
-        health: () => Effect.succeed({ healthy: true, version: "2.0.0", pid: 1 }),
-        config: () => Effect.succeed([]),
+        info: () =>
+          Effect.succeed({
+            version: "2.0.0",
+            pid: 1,
+            urls: config.server ? [config.server] : [],
+            paths: { tmp: "/tmp/opencode" },
+          }),
+        config: () => Effect.succeed(configEntries),
         reference: () =>
           Effect.succeed({
             location: {
@@ -269,12 +282,18 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
           const project = config.project as typeof config.project & { canonical?: string; worktree?: string }
           return Effect.succeed([{ ...project, canonical: project.canonical ?? project.worktree ?? config.directory }])
         },
-        projectCurrent: () =>
-          Effect.succeed({
-            id: (config.project as { id?: string }).id,
-            directory: config.directory,
-            canonical: config.directory,
-          }),
+        projectUpdate: (ctx) => {
+          const project = config.project as { canonical?: string }
+          return Effect.succeed({
+            ...project,
+            ...ctx.payload,
+            id: ctx.params.projectID,
+            canonical: project.canonical ?? config.directory,
+          })
+        },
+        configShells: () => Effect.succeed(config.shells ?? []),
+        configUpdate: () => noContent,
+        websearchProviders: () => Effect.succeed({ location: location(config), data: config.websearchProviders ?? [] }),
         worktreeList: () =>
           Effect.succeed([
             { directory: config.directory },
@@ -284,7 +303,7 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
             })),
           ]),
         worktreeCreate: (ctx) => {
-          const input = record(ctx.payload) ? ctx.payload : {}
+          const input = ctx.payload
           return Effect.succeed({
             directory: `${typeof input.directory === "string" ? input.directory : config.directory}/${
               typeof input.name === "string" ? input.name : "copy"
@@ -424,7 +443,7 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
               data: {
                 id: typeof body.id === "string" ? body.id : `inb_mock_${Date.now()}`,
                 sessionID: ctx.params.sessionID,
-                timeCreated: Date.now(),
+                time: { created: Date.now() },
                 type: "user",
                 payload: {
                   text: typeof body.text === "string" ? body.text : "",
@@ -441,9 +460,13 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
           Effect.sync(() =>
             config.onInboxChange?.({ sessionID: ctx.params.sessionID, inboxID: ctx.params.inboxID, action: "cancel" }),
           ).pipe(Effect.andThen(noContent)),
-        sessionInboxSteer: (ctx) =>
+        sessionInboxUpdate: (ctx) =>
           Effect.sync(() =>
-            config.onInboxChange?.({ sessionID: ctx.params.sessionID, inboxID: ctx.params.inboxID, action: "steer" }),
+            config.onInboxChange?.({
+              sessionID: ctx.params.sessionID,
+              inboxID: ctx.params.inboxID,
+              action: ctx.payload.delivery,
+            }),
           ).pipe(Effect.andThen(noContent)),
         sessionSwitchAgent: () => noContent,
         sessionSwitchModel: () => noContent,
@@ -634,11 +657,6 @@ export function currentSession(session: { id: string } & Record<string, unknown>
           : typeof session.directory === "string"
             ? session.directory
             : fallbackDirectory,
-      ...(typeof session.workspaceID === "string"
-        ? { workspaceID: session.workspaceID }
-        : "workspaceID" in location && typeof location.workspaceID === "string"
-          ? { workspaceID: location.workspaceID }
-          : {}),
     },
     subpath: session.subpath ?? session.path,
     revert: session.revert,

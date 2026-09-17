@@ -174,7 +174,6 @@ const appBindingCommands = [
   "app.toggle.file_context",
   "app.toggle.diffwrap",
   "app.toggle.paste_summary",
-  "permission.mode",
 ] as const
 
 export type TuiInput = {
@@ -287,8 +286,6 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
       )
       renderer.once("destroy", () => shutdown.openUnsafe())
       yield* Effect.tryPromise(async () => {
-        // Prewarm palette before ThemeProvider mounts so `system` theme avoids a first-paint fallback flash.
-        void renderer.getPalette({ size: 16 }).catch(() => undefined)
         const mode = handoff?.mode ?? (await renderer.waitForThemeMode(1000)) ?? "dark"
         if (renderer.isDestroyed) return
 
@@ -486,7 +483,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   const toast = useToast()
   const updater = useUpdateNotification()
   const theme = useTheme()
-  const { mode, supports, setMode, locked, lock, unlock, transparent, toggleTransparent } = useThemes()
+  const { mode, supports, setMode, locked, lock, unlock, transparent, toggleTransparent, afterPaint } = useThemes()
   const data = useData()
   const location = useLocation()
   const exit = useExit()
@@ -494,13 +491,23 @@ function App(props: { pair?: DialogPairCredentials }) {
   const plugins = usePlugin()
   const clipboard = useClipboard()
   const terminalEnvironment = useTuiTerminalEnvironment()
+  let paletteTimer: ReturnType<typeof setTimeout> | undefined
+  const afterFrame = () => {
+    // The native writer can still be flushing the frame when FRAME fires. Keep OSC probes behind visible app output.
+    paletteTimer = setTimeout(afterPaint, 50)
+  }
+  onMount(() => renderer.once(CliRenderEvents.FRAME, afterFrame))
+  onCleanup(() => {
+    renderer.off(CliRenderEvents.FRAME, afterFrame)
+    if (paletteTimer) clearTimeout(paletteTimer)
+  })
   createEffect(() => {
     if (client.connection.status() !== "connected") return
     if (route.data.type !== "session") return
     const session = data.session.get(route.data.sessionID)
     if (!session) return
     if (data.session.creating(session.id)) return
-    if (session.location.workspaceID !== undefined || terminalEnvironment.variables === undefined) return
+    if (terminalEnvironment.variables === undefined) return
     void client.api.session
       .environment({ sessionID: session.id, variables: terminalEnvironment.variables })
       .catch(toast.error)
@@ -665,7 +672,6 @@ function App(props: { pair?: DialogPairCredentials }) {
         order: "desc",
         parentID: null,
         directory: location.directory,
-        workspace: location.workspaceID,
       })
       .then((response) => {
         const match = response.data[0]?.id
@@ -675,7 +681,7 @@ function App(props: { pair?: DialogPairCredentials }) {
           return
         }
         void client.api.session
-          .fork({ sessionID: match, boundary: { type: "through" } })
+          .fork({ sessionID: match })
           .then((result) => route.navigate({ type: "session", sessionID: result.id, prompt: startupPrompt }))
           .catch(toast.error)
       })
@@ -688,7 +694,7 @@ function App(props: { pair?: DialogPairCredentials }) {
     if (forked || !args.sessionID || !args.fork) return
     forked = true
     void client.api.session
-      .fork({ sessionID: args.sessionID, boundary: { type: "through" } })
+      .fork({ sessionID: args.sessionID })
       .then((result) => route.navigate({ type: "session", sessionID: result.id, prompt: startupPrompt }))
       .catch(toast.error)
   })
@@ -822,7 +828,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         title: "Switch model",
         suggested: true,
         category: "Agent",
-        slash: { name: "models", aliases: ["mo"] },
+        slash: { name: "models" },
         run: () => {
           dialog.replace(() => <DialogModel />)
         },
@@ -903,7 +909,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         title: "Switch model variant",
         category: "Agent",
         palette: local.model.variant.list().length === 0 ? undefined : (true as const),
-        slash: { name: "variants" },
+        slash: { name: "variants", aliases: ["thinking", "effort"] },
         run: () => {
           if (local.model.variant.list().length === 0) {
             return toast.show({
@@ -998,6 +1004,22 @@ function App(props: { pair?: DialogPairCredentials }) {
             },
           ]
         : []),
+      {
+        name: "location.reload",
+        title: "Reload locations",
+        slash: { name: "reload" },
+        run: async () => {
+          dialog.clear()
+          toast.show({ variant: "info", message: "Reloading all locations…", duration: 30000 })
+          await client.api.location
+            .reload()
+            .then(() => {
+              toast.show({ variant: "success", message: "Locations reloaded" })
+            })
+            .catch(toast.error)
+        },
+        category: "System",
+      },
       {
         name: "opencode.debug",
         title: "View debug info",
@@ -1183,16 +1205,6 @@ function App(props: { pair?: DialogPairCredentials }) {
           dialog.clear()
         },
       },
-      {
-        name: "permission.mode",
-        title:
-          local.permission.mode === "auto" ? "Disable auto-approve permissions" : "Enable auto-approve permissions",
-        category: "System",
-        run: () => {
-          local.permission.toggle()
-          dialog.clear()
-        },
-      },
     ].map(
       ({ name, category, ...command }) =>
         ({
@@ -1240,13 +1252,13 @@ function App(props: { pair?: DialogPairCredentials }) {
     bindings: ["app.exit"],
   }))
 
-  event.on("tui.command.execute", (evt, { workspace }) => {
-    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
+  event.on("tui.command.execute", (evt, { directory }) => {
+    if (directory !== (location.current?.directory ?? data.location.default().directory)) return
     keymap.dispatch(evt.data.command)
   })
 
-  event.on("tui.toast.show", (evt, { workspace }) => {
-    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
+  event.on("tui.toast.show", (evt, { directory }) => {
+    if (directory !== (location.current?.directory ?? data.location.default().directory)) return
     toast.show({
       title: evt.data.title,
       message: evt.data.message,
@@ -1255,8 +1267,8 @@ function App(props: { pair?: DialogPairCredentials }) {
     })
   })
 
-  event.on("tui.session.select", (evt, { workspace }) => {
-    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
+  event.on("tui.session.select", (evt, { directory }) => {
+    if (directory !== (location.current?.directory ?? data.location.default().directory)) return
     route.navigate({
       type: "session",
       sessionID: evt.data.sessionID,
