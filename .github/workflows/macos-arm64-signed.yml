@@ -56,8 +56,8 @@ on:
         default: true
       release_version:
         description: >-
-          Version embedded in the binaries. Leave empty to use the package
-          version (packages/cli on v2, packages/opencode on dev).
+          Version embedded in the binaries. Leave empty to use this branch's
+          package version.
         required: false
         type: string
         default: ""
