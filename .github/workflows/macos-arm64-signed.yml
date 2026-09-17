@@ -4,13 +4,11 @@
 # UX: one manual click — Actions → macos-arm64-signed → Run workflow
 #     (uncheck "Build and release the desktop DMG" for CLI-only builds)
 #
-# Channel (drives git ref, CLI package, and baked updater channel):
-#   v2    — v2 branch, OpenCode 2 CLI (packages/cli, bin/opencode) + desktop
-#           CLI/desktop updater channel latest/prod (stable OpenCode 2)
-#   beta  — same v2 tree, but CLI+desktop updater channel beta
-#   prod  — dev branch, classic V1 CLI (packages/opencode)
+# Product:
+#   opencode-2  — v2 branch, OpenCode 2 (packages/cli, bin/opencode) + desktop
+#   classic-v1  — this branch (dev), classic V1 CLI (packages/opencode)
 #
-# v2/beta jobs check out ref v2, so local actions/scripts must exist there too:
+# OpenCode 2 jobs check out ref v2, so local actions/scripts must exist there too:
 # .github/actions/macos-codesigning-setup and .github/scripts/macos-signing
 # are mirrored onto the v2 branch — keep them in sync when they change here.
 #
@@ -30,8 +28,8 @@
 #
 # OpenCode 2 compile matches upstream publish.yml: Bun from v2 package.json
 # (currently 1.4.2) and BUN_COMPILE_RELEASE=bun-v1.4.2.
-# Desktop embeds that same-commit CLI via OPENCODE_CLI_DIST (prod prebuild
-# requires it; beta otherwise downloads npm @beta).
+# Desktop embeds that same-commit CLI via OPENCODE_CLI_DIST (required for
+# OpenCode 2 production desktop builds).
 #
 # codesigning environment (secrets/vars):
 #   secrets: APPLE_DEVELOPER_ID_P12, APPLE_DEVELOPER_ID_P12_PASSWORD,
@@ -43,7 +41,7 @@
 #
 # Assets:
 #   opencode-desktop-mac-arm64.dmg
-#   opencode-cli-mac-arm64.dmg (opencode; V1 on prod, OpenCode 2 on v2/beta)
+#   opencode-cli-mac-arm64.dmg (opencode)
 # Tag: macos-arm64-v{version}-{7-char commit sha}
 
 name: macos-arm64-signed
@@ -59,22 +57,20 @@ on:
       release_version:
         description: >-
           Version embedded in the binaries. Leave empty to use the package
-          version (packages/opencode on prod, packages/cli on v2/beta).
+          version (packages/cli for OpenCode 2, packages/opencode for classic V1).
         required: false
         type: string
         default: ""
-      channel:
+      product:
         description: >-
-          v2 = stable OpenCode 2 from the v2 branch (your changes).
-          beta = same tree with the beta updater channel.
-          prod = classic V1 from this branch (dev).
+          OpenCode 2 builds your v2 branch (your changes).
+          Classic V1 builds this branch (dev).
         required: false
         type: choice
         options:
-          - v2
-          - beta
-          - prod
-        default: v2
+          - opencode-2
+          - classic-v1
+        default: opencode-2
       build_desktop:
         description: Build and release the desktop DMG too. Uncheck to build and release only the CLI DMG.
         required: false
@@ -85,7 +81,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.channel }}-${{ inputs.release_version || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.product }}-${{ inputs.release_version || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -106,11 +102,11 @@ jobs:
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
         with:
-          ref: ${{ inputs.channel == 'prod' && github.ref || 'v2' }}
+          ref: ${{ inputs.product == 'classic-v1' && github.ref || 'v2' }}
           persist-credentials: false
 
       # The dispatch SHA belongs to the branch the workflow file lives on (dev);
-      # beta builds from v2, so bind the tag and release to the commit actually built.
+      # OpenCode 2 builds from v2, so bind the tag and release to the commit actually built.
       - name: Resolve built commit
         id: sha
         shell: bash
@@ -121,10 +117,9 @@ jobs:
         shell: bash
         env:
           INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
-          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_CHANNEL: ${{ inputs.product }}
           GITHUB_SHA: ${{ steps.sha.outputs.sha }}
-          # prod tracks classic CLI; v2/beta track packages/cli on the v2 branch.
-          PACKAGE_JSON: ${{ inputs.channel == 'prod' && 'packages/opencode/package.json' || 'packages/cli/package.json' }}
+          PACKAGE_JSON: ${{ inputs.product == 'classic-v1' && 'packages/opencode/package.json' || 'packages/cli/package.json' }}
           WORKSPACE: ${{ github.workspace }}
         run: ./.github/scripts/macos-signing/resolve_release.sh
 
@@ -148,7 +143,7 @@ jobs:
       - uses: ./.github/actions/setup-bun
         if: needs.resolve-version.outputs.product != 'v2'
 
-      # v2 setup-bun accepts bun-version; the prod (dev) action copy does not.
+      # OpenCode 2 setup-bun accepts bun-version; the classic-v1 (dev) copy does not.
       # Omit bun-version so OpenCode 2 uses the v2 package.json pin (1.4.2).
       - uses: ./.github/actions/setup-bun
         if: needs.resolve-version.outputs.product == 'v2'
@@ -318,8 +313,8 @@ jobs:
         with:
           node-version: "24"
 
-      # Same-commit OpenCode 2 CLI from the Linux build. prod prebuild requires
-      # OPENCODE_CLI_DIST; beta otherwise fetches npm @beta.
+      # Same-commit OpenCode 2 CLI from the Linux build. Desktop prod prebuild
+      # requires OPENCODE_CLI_DIST.
       - name: Download unsigned CLI
         if: needs.resolve-version.outputs.product == 'v2'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -484,12 +479,12 @@ jobs:
         id: notes
         shell: bash
         env:
-          CHANNEL: ${{ inputs.channel }}
+          PRODUCT: ${{ inputs.product }}
           BUILT_SHA: ${{ needs.resolve-version.outputs.built_sha }}
         run: |
           set -euo pipefail
           notes_path="${RUNNER_TEMP}/release-notes.md"
-          # v2/beta check out v2, so the dispatch SHA (dev) is not in this clone.
+          # OpenCode 2 checks out v2, so the dispatch SHA (dev) is not in this clone.
           if ! git cat-file -e "${BUILT_SHA}^{commit}" 2>/dev/null; then
             git fetch --depth=1 origin "${BUILT_SHA}"
           fi
@@ -502,7 +497,7 @@ jobs:
               echo "Asset (hard-verified for codesign + staple before publish):"
             fi
             echo
-            if [[ "${CHANNEL}" == "prod" ]]; then
+            if [[ "${PRODUCT}" == "classic-v1" ]]; then
               echo "- \`opencode-cli-mac-arm64.dmg\` — classic V1 terminal CLI (\`opencode\`)"
             else
               echo "- \`opencode-cli-mac-arm64.dmg\` — OpenCode 2 terminal CLI (\`opencode\`)"
@@ -511,7 +506,7 @@ jobs:
               echo "- \`opencode-desktop-mac-arm64.dmg\` — desktop app"
             fi
             echo
-            echo "Channel: \`${{ needs.resolve-version.outputs.channel }}\` (CLI updater \`${{ needs.resolve-version.outputs.cli_channel }}\`)"
+            echo "Product: \`${{ inputs.product }}\`"
             echo
             echo "Built from \`${BUILT_SHA}\`."
             echo

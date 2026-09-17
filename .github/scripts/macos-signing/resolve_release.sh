@@ -5,7 +5,7 @@
 #
 # Env inputs:
 #   INPUT_RELEASE_VERSION  optional override
-#   INPUT_CHANNEL          prod|v2|beta|dev|next (default prod)
+#   INPUT_CHANNEL          opencode-2|classic-v1 (aliases: v2, prod, beta, dev, next)
 #   GITHUB_SHA             required
 #   GITHUB_OUTPUT          required in Actions
 #   WORKSPACE              optional repo root (default cwd)
@@ -34,38 +34,31 @@ if [[ ! "${short_sha}" =~ ^${short_sha_re}$ ]]; then
   exit 1
 fi
 
-# Workflow input vs baked updater channels.
-#   prod — V1 from dev; CLI latest, desktop prod
-#   v2   — OpenCode 2 from the v2 branch; CLI latest, desktop prod
-#   beta — OpenCode 2 preview from v2; CLI+desktop beta
-channel="${INPUT_CHANNEL:-prod}"
+# User-facing product vs baked updater channels.
+#   opencode-2  — OpenCode 2 from the v2 branch; CLI latest, desktop prod
+#   classic-v1  — V1 from dev; CLI latest, desktop prod
+channel="${INPUT_CHANNEL:-opencode-2}"
 case "${channel}" in
-  prod)
+  opencode-2 | v2)
+    product="v2"
+    cli_channel="latest"
+    desktop_channel="prod"
+    cli_dir="packages/cli/dist/cli-darwin-arm64"
+    ;;
+  classic-v1 | prod)
     product="v1"
     cli_channel="latest"
     desktop_channel="prod"
     cli_dir="packages/opencode/dist/opencode-darwin-arm64"
     ;;
-  v2)
-    product="v2"
-    cli_channel="latest"
-    desktop_channel="prod"
-    cli_dir="packages/cli/dist/cli-darwin-arm64"
-    ;;
-  beta)
-    product="v2"
-    cli_channel="beta"
-    desktop_channel="beta"
-    cli_dir="packages/cli/dist/cli-darwin-arm64"
-    ;;
-  dev|next)
+  beta | dev | next)
     product="v2"
     cli_channel="${channel}"
     desktop_channel="${channel}"
     cli_dir="packages/cli/dist/cli-darwin-arm64"
     ;;
   *)
-    echo "Unsupported channel '${channel}'" >&2
+    echo "Unsupported product '${channel}'" >&2
     exit 1
     ;;
 esac
